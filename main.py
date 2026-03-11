@@ -9,7 +9,7 @@ import yaml
 from rich.console import Console
 
 from cache import CacheDB
-from classifier import LLMClient, build_file_stub, classify_files, summarize_text
+from classifier import LLMClient, build_file_stub, classify_files, classify_files_iter, summarize_text
 from report import generate_reports
 from scanner import scan_files
 from summarizer import UnsupportedSummaryError, extract_text
@@ -87,17 +87,19 @@ def run_scan(force: bool = False) -> None:
 
         batch_size = get_batch_size(config)
         console.print(f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
-        results = classify_files(client, pending, batch_size=batch_size)
 
         classified = 0
-        for index, item in enumerate(results, start=1):
-            file_path = item.get("file_path")
-            category = item.get("category")
-            if not file_path or not category:
-                continue
-            cache.update_category(str(file_path), str(category))
-            classified += 1
-            console.print(f"进度：{index}/{len(results)} - {Path(str(file_path)).name} -> {category}")
+        processed = 0
+        for done, total, batch_results in classify_files_iter(client, pending, batch_size=batch_size):
+            for item in batch_results:
+                file_path = item.get("file_path")
+                category = item.get("category")
+                if not file_path or not category:
+                    continue
+                cache.update_category(str(file_path), str(category))
+                classified += 1
+            processed = done
+            console.print(f"进度：{done}/{total} - 已分类 {classified} 个文件")
 
         console.print("[cyan]分类完成，正在生成报告...[/cyan]")
         generate_reports(cache.list_all())

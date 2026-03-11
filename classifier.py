@@ -4,6 +4,7 @@ import json
 import os
 import time
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 import anthropic
@@ -135,6 +136,23 @@ def classify_files(client: LLMClient, files: list[dict[str, Any]], batch_size: i
         if isinstance(batch_results, list):
             results.extend(batch_results)
     return results
+
+
+def classify_files_iter(
+    client: LLMClient, files: list[dict[str, Any]], batch_size: int
+) -> Iterator[tuple[int, int, list[dict[str, Any]]]]:
+    """Yield (completed_count, total_count, batch_results) after each batch."""
+    batches = chunk_list(files, batch_size)
+    total = len(files)
+    done = 0
+    for batch in batches:
+        prompt = build_classification_prompt(batch)
+        payload = client.complete_json(prompt, model=client.model)
+        batch_results = payload.get("classifications", [])
+        if not isinstance(batch_results, list):
+            batch_results = []
+        done += len(batch)
+        yield done, total, batch_results
 
 
 def build_summary_prompt(file_path: str, extracted_text: str) -> str:
