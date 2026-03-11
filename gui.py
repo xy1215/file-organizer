@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sys
 import webbrowser
 from contextlib import redirect_stderr, redirect_stdout
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QProgressBar,
     QPlainTextEdit,
     QRadioButton,
     QSpinBox,
@@ -145,6 +147,7 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self._load_into_form(load_config())
+        self.current_command: list[str] = []
         self._update_run_buttons()
 
     def _build_top_area(self) -> QHBoxLayout:
@@ -261,6 +264,12 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(box)
         self.status_label = QLabel("空闲")
         self.status_label.setStyleSheet("font-weight: 600;")
+        self.phase_label = QLabel("等待开始")
+        self.phase_label.setStyleSheet("color: #586271;")
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("未开始")
         self.log_output = QPlainTextEdit()
         self.log_output.setReadOnly(True)
         self.log_output.setPlaceholderText("运行输出会显示在这里。")
@@ -268,6 +277,8 @@ class MainWindow(QMainWindow):
         clear_button.clicked.connect(self.log_output.clear)
 
         layout.addWidget(self.status_label)
+        layout.addWidget(self.phase_label)
+        layout.addWidget(self.progress_bar)
         layout.addWidget(self.log_output, stretch=1)
         layout.addWidget(clear_button, alignment=Qt.AlignRight)
         return box
@@ -358,8 +369,11 @@ class MainWindow(QMainWindow):
 
         config = self._build_config_from_form()
         save_config(config)
+        self.current_command = list(args)
         self.log_output.clear()
         self.status_label.setText(f"运行中：{' '.join(args)}")
+        self.phase_label.setText("任务已启动，正在准备...")
+        self._set_busy_progress()
         self._append_log(f"开始执行：{' '.join(args)}")
         self._update_run_buttons(running=True)
 
@@ -370,8 +384,14 @@ class MainWindow(QMainWindow):
 
     def _on_worker_finished(self, success: bool, message: str) -> None:
         self.status_label.setText("已完成" if success else "执行失败")
+        self.phase_label.setText("任务完成" if success else "任务失败")
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(100 if success else 0)
+        self.progress_bar.setFormat("完成" if success else "失败")
         if message:
             self._append_log(message)
+        elif success:
+            self._append_log("任务执行完成。")
         self._update_run_buttons(running=False)
 
     def _update_run_buttons(self, running: bool = False) -> None:
@@ -392,10 +412,60 @@ class MainWindow(QMainWindow):
         webbrowser.open(REPORT_PATH.resolve().as_uri())
 
     def _append_log(self, message: str) -> None:
+        self._update_progress_from_log(message)
         self.log_output.appendPlainText(message)
         cursor = self.log_output.textCursor()
         cursor.movePosition(QTextCursor.End)
         self.log_output.setTextCursor(cursor)
+
+    def _set_busy_progress(self) -> None:
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setFormat("处理中...")
+
+    def _update_progress_from_log(self, message: str) -> None:
+        plain = self._strip_rich_markup(message)
+        if "正在扫描目录" in plain:
+            self.phase_label.setText("正在扫描目录...")
+            self._set_busy_progress()
+            return
+        if "正在检查缓存" in plain:
+            self.phase_label.setText("扫描完成，正在检查缓存...")
+            self._set_busy_progress()
+            return
+        if "开始分类" in plain or "缓存检查完成，开始分类" in plain:
+            self.phase_label.setText("正在调用模型进行分类...")
+            self._set_busy_progress()
+        if "正在生成摘要" in plain or "开始生成摘要" in plain:
+            self.phase_label.setText("正在生成摘要...")
+            self._set_busy_progress()
+        if "正在生成报告" in plain or "正在刷新报告" in plain:
+            self.phase_label.setText("正在生成报告...")
+            self._set_busy_progress()
+            return
+        if "正在读取缓存统计" in plain:
+            self.phase_label.setText("正在读取缓存统计...")
+            self._set_busy_progress()
+            return
+
+        match = re.search(r"进度：(\d+)/(\d+)", plain)
+        if match:
+            current = int(match.group(1))
+            total = int(match.group(2))
+            value = int(current * 100 / total) if total else 0
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(value)
+            self.progress_bar.setFormat(f"{current}/{total}")
+            self.phase_label.setText(plain)
+            return
+
+        if "执行失败" in plain or "摘要失败" in plain:
+            self.phase_label.setText("任务出现错误，请查看日志。")
+            return
+        if "扫描完成" in plain or "摘要任务完成" in plain or "报告已生成" in plain:
+            self.phase_label.setText(plain)
+
+    def _strip_rich_markup(self, message: str) -> str:
+        return re.sub(r"\[[^\]]+\]", "", message).strip()
 
 
 def run_gui() -> int:

@@ -46,6 +46,7 @@ def run_scan(force: bool = False) -> None:
     config = load_config()
     cache = get_cache()
     try:
+        console.print("[cyan]正在扫描目录，请稍候...[/cyan]")
         scanned_files = scan_files(
             paths=config.get("scan", {}).get("paths", []),
             exclude_patterns=config.get("scan", {}).get("exclude_patterns", []),
@@ -54,6 +55,7 @@ def run_scan(force: bool = False) -> None:
             console.print("[yellow]没有扫描到符合条件的文件。[/yellow]")
             return
 
+        console.print(f"[cyan]扫描完成，发现 {len(scanned_files)} 个符合条件的文件，正在检查缓存...[/cyan]")
         pending: list[dict[str, Any]] = []
         for item in scanned_files:
             cache.upsert_file(
@@ -73,6 +75,7 @@ def run_scan(force: bool = False) -> None:
 
         if not pending:
             console.print(f"[green]扫描完成，共 {len(scanned_files)} 个文件，未发现需要重新分类的文件。[/green]")
+            console.print("[cyan]正在刷新报告...[/cyan]")
             generate_reports(cache.list_all())
             console.print("[green]已刷新 report.html 和 report.json。[/green]")
             return
@@ -83,7 +86,7 @@ def run_scan(force: bool = False) -> None:
             raise click.ClickException(str(exc)) from exc
 
         batch_size = get_batch_size(config)
-        console.print(f"[cyan]开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
+        console.print(f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
         results = classify_files(client, pending, batch_size=batch_size)
 
         classified = 0
@@ -96,6 +99,7 @@ def run_scan(force: bool = False) -> None:
             classified += 1
             console.print(f"进度：{index}/{len(results)} - {Path(str(file_path)).name} -> {category}")
 
+        console.print("[cyan]分类完成，正在生成报告...[/cyan]")
         generate_reports(cache.list_all())
         console.print(
             f"[green]扫描完成。总扫描 {len(scanned_files)} 个文件，本次分类 {classified} 个文件。[/green]"
@@ -156,6 +160,7 @@ def run_summarize(
             console.print("[yellow]没有找到需要生成摘要的文件。[/yellow]")
             return
 
+        console.print(f"[cyan]已找到 {len(targets)} 个目标文件，开始生成摘要...[/cyan]")
         success = 0
         for index, target in enumerate(targets, start=1):
             console.print(f"[cyan]进度：{index}/{len(targets)} - 正在处理 {Path(target).name}[/cyan]")
@@ -166,6 +171,7 @@ def run_summarize(
                 logging.error("摘要失败: %s | %s", target, message)
             console.print(message)
 
+        console.print("[cyan]摘要生成完成，正在刷新报告...[/cyan]")
         generate_reports(cache.list_all())
         console.print(f"[green]摘要任务完成，成功 {success}/{len(targets)}。[/green]")
     finally:
@@ -175,6 +181,7 @@ def run_summarize(
 def run_report() -> None:
     cache = get_cache()
     try:
+        console.print("[cyan]正在生成报告...[/cyan]")
         generate_reports(cache.list_all())
         console.print("[green]报告已生成：report.html, report.json[/green]")
     finally:
@@ -184,6 +191,7 @@ def run_report() -> None:
 def run_stats() -> None:
     cache = get_cache()
     try:
+        console.print("[cyan]正在读取缓存统计...[/cyan]")
         stats_data = cache.stats()
         console.print(f"缓存文件总数：{stats_data['total_files']}")
         console.print(f"已分类文件数：{stats_data['categorized_files']}")
