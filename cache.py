@@ -168,6 +168,17 @@ class CacheDB:
         )
         self.conn.commit()
 
+    def delete_absent_files(self, existing_paths: set[str]) -> int:
+        if not existing_paths:
+            return 0
+        placeholders = ",".join("?" for _ in existing_paths)
+        with self.conn:
+            cursor = self.conn.execute(
+                f"DELETE FROM file_cache WHERE file_path NOT IN ({placeholders})",
+                tuple(existing_paths),
+            )
+        return cursor.rowcount
+
     def list_all(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
             "SELECT * FROM file_cache ORDER BY category IS NULL, category, file_path"

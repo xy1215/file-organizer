@@ -36,7 +36,12 @@ def get_cache() -> CacheDB:
 
 
 def get_batch_size(config: dict[str, Any]) -> int:
-    raw_value = int(config.get("batch_size", 80) or 80)
+    raw = config.get("batch_size", 80)
+    try:
+        raw_value = int(raw or 80)
+    except (TypeError, ValueError):
+        console.print("[yellow]batch_size 配置无效，已使用默认值 80。[/yellow]")
+        raw_value = 80
     if raw_value < 80 or raw_value > 100:
         console.print("[yellow]batch_size 超出建议范围，已自动调整到 80-100 之间。[/yellow]")
     return min(100, max(80, raw_value))
@@ -56,6 +61,11 @@ def run_scan(force: bool = False) -> None:
             return
 
         console.print(f"[cyan]扫描完成，发现 {len(scanned_files)} 个符合条件的文件，正在检查缓存...[/cyan]")
+        scanned_paths = {item.file_path for item in scanned_files}
+        removed = cache.delete_absent_files(scanned_paths)
+        if removed:
+            console.print(f"[cyan]已清理 {removed} 条失效缓存记录（源文件不存在）。[/cyan]")
+
         unchanged_paths: set[str] = set()
         upsert_rows: list[tuple[str, int, float]] = []
         for item in scanned_files:

@@ -68,6 +68,14 @@ def save_config(config: dict[str, Any]) -> None:
         yaml.safe_dump(config, handle, allow_unicode=True, sort_keys=False)
 
 
+def normalize_batch_size(raw_value: Any) -> int:
+    try:
+        value = int(raw_value or 80)
+    except (TypeError, ValueError):
+        return 80
+    return min(100, max(80, value))
+
+
 class SignalStream(StringIO):
     def __init__(self, callback) -> None:
         super().__init__()
@@ -291,7 +299,7 @@ class MainWindow(QMainWindow):
         self.model_input.setText(str(llm.get("model", "gpt-4o-mini")))
         self.summary_model_input.setText(str(llm.get("summary_model", "gpt-4o-mini")))
         self.base_url_input.setText(str(llm.get("base_url", "")))
-        self.batch_size_input.setValue(int(config.get("batch_size", 80) or 80))
+        self.batch_size_input.setValue(normalize_batch_size(config.get("batch_size", 80)))
 
         self.path_list.clear()
         for path in scan.get("paths", []):
