@@ -46,8 +46,8 @@ def normalize_scan_paths(extra_paths: list[str] | None = None) -> list[Path]:
     return paths
 
 
-def should_exclude_dir(dir_name: str, exclude_patterns: list[str]) -> bool:
-    return dir_name.startswith(".") or dir_name in set(exclude_patterns)
+def should_exclude_dir(dir_name: str, exclude_patterns: set[str]) -> bool:
+    return dir_name.startswith(".") or dir_name in exclude_patterns
 
 
 def is_valid_file(path: Path) -> bool:
@@ -65,13 +65,13 @@ def is_valid_file(path: Path) -> bool:
 
 
 def scan_files(paths: list[str] | None = None, exclude_patterns: list[str] | None = None) -> list[ScannedFile]:
-    exclude_patterns = exclude_patterns or []
+    exclude_set = set(exclude_patterns or [])
     scanned: list[ScannedFile] = []
     for root in normalize_scan_paths(paths):
         if not root.exists():
             continue
         for current_root, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if not should_exclude_dir(d, exclude_patterns)]
+            dirnames[:] = [d for d in dirnames if not should_exclude_dir(d, exclude_set)]
             for filename in filenames:
                 file_path = Path(current_root) / filename
                 if not is_valid_file(file_path):

@@ -168,16 +168,29 @@ class CacheDB:
         )
         self.conn.commit()
 
+    @staticmethod
+    def _chunked(items: list[str], size: int) -> list[list[str]]:
+        return [items[i : i + size] for i in range(0, len(items), size)]
+
     def delete_absent_files(self, existing_paths: set[str]) -> int:
-        if not existing_paths:
+        cached_rows = self.conn.execute("SELECT file_path FROM file_cache").fetchall()
+        if not cached_rows:
             return 0
-        placeholders = ",".join("?" for _ in existing_paths)
+
+        stale_paths = [row["file_path"] for row in cached_rows if row["file_path"] not in existing_paths]
+        if not stale_paths:
+            return 0
+
+        deleted = 0
         with self.conn:
-            cursor = self.conn.execute(
-                f"DELETE FROM file_cache WHERE file_path NOT IN ({placeholders})",
-                tuple(existing_paths),
-            )
-        return cursor.rowcount
+            for chunk in self._chunked(stale_paths, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                cursor = self.conn.execute(
+                    f"DELETE FROM file_cache WHERE file_path IN ({placeholders})",
+                    tuple(chunk),
+                )
+                deleted += max(cursor.rowcount, 0)
+        return deleted
 
     def list_all(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(
