@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
+.venv/
+build/
+dist/
 cache.db
 error.log
 report.html

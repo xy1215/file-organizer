@@ -42,15 +42,7 @@ def get_batch_size(config: dict[str, Any]) -> int:
     return min(100, max(80, raw_value))
 
 
-@click.group()
-def cli() -> None:
-    """本地文件管理分类与摘要工具"""
-
-
-@cli.command()
-@click.option("--force", is_flag=True, help="强制重新处理所有文件")
-def scan(force: bool) -> None:
-    """扫描并分类文件"""
+def run_scan(force: bool = False) -> None:
     config = load_config()
     cache = get_cache()
     try:
@@ -86,6 +78,7 @@ def scan(force: bool) -> None:
             client = LLMClient(config)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
+
         batch_size = get_batch_size(config)
         console.print(f"[cyan]开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
         results = classify_files(client, pending, batch_size=batch_size)
@@ -131,12 +124,11 @@ def _summarize_file(cache: CacheDB, client: LLMClient, file_path: str) -> tuple[
         return False, f"摘要失败：{exc}"
 
 
-@cli.command()
-@click.option("--category", "category_name", type=str, help="为指定分类生成摘要")
-@click.option("--file", "file_path", type=str, help="为单个文件生成摘要")
-@click.option("--all", "summarize_all", is_flag=True, help="为所有已分类文件生成摘要")
-def summarize(category_name: str | None, file_path: str | None, summarize_all: bool) -> None:
-    """生成摘要"""
+def run_summarize(
+    category_name: str | None = None,
+    file_path: str | None = None,
+    summarize_all: bool = False,
+) -> None:
     selected = sum(bool(value) for value in [category_name, file_path, summarize_all])
     if selected != 1:
         raise click.ClickException("请在 --category、--file、--all 中且仅选择一个。")
@@ -148,6 +140,7 @@ def summarize(category_name: str | None, file_path: str | None, summarize_all: b
             client = LLMClient(config)
         except ValueError as exc:
             raise click.ClickException(str(exc)) from exc
+
         targets: list[str] = []
         if file_path:
             targets = [str(Path(file_path).expanduser().resolve())]
@@ -176,9 +169,7 @@ def summarize(category_name: str | None, file_path: str | None, summarize_all: b
         cache.close()
 
 
-@cli.command()
-def report() -> None:
-    """生成或刷新报告"""
+def run_report() -> None:
     cache = get_cache()
     try:
         generate_reports(cache.list_all())
@@ -187,9 +178,7 @@ def report() -> None:
         cache.close()
 
 
-@cli.command()
-def stats() -> None:
-    """查看缓存统计"""
+def run_stats() -> None:
     cache = get_cache()
     try:
         stats_data = cache.stats()
@@ -201,6 +190,39 @@ def stats() -> None:
             console.print(f"- {item['category']}: {item['count']}")
     finally:
         cache.close()
+
+
+@click.group()
+def cli() -> None:
+    """本地文件管理分类与摘要工具"""
+
+
+@cli.command()
+@click.option("--force", is_flag=True, help="强制重新处理所有文件")
+def scan(force: bool) -> None:
+    """扫描并分类文件"""
+    run_scan(force=force)
+
+
+@cli.command()
+@click.option("--category", "category_name", type=str, help="为指定分类生成摘要")
+@click.option("--file", "file_path", type=str, help="为单个文件生成摘要")
+@click.option("--all", "summarize_all", is_flag=True, help="为所有已分类文件生成摘要")
+def summarize(category_name: str | None, file_path: str | None, summarize_all: bool) -> None:
+    """生成摘要"""
+    run_summarize(category_name=category_name, file_path=file_path, summarize_all=summarize_all)
+
+
+@cli.command()
+def report() -> None:
+    """生成或刷新报告"""
+    run_report()
+
+
+@cli.command()
+def stats() -> None:
+    """查看缓存统计"""
+    run_stats()
 
 
 @cli.command()

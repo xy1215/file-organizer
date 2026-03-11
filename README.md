@@ -4,6 +4,8 @@
 
 现在项目也提供桌面图形界面，普通用户可以直接点击按钮完成扫描、摘要和查看报告。
 
+如果要给 Windows 普通用户使用，项目也提供了 `.exe` 打包方案，可直接打成双击运行的桌面程序。
+
 ## 功能说明
 
 - 默认扫描 `桌面`、`文档`、`下载` 三个目录
@@ -95,6 +97,23 @@ python main.py gui
 - 一键生成摘要
 - 直接打开 HTML 报告
 - 在窗口中查看运行日志
+
+### Windows 打包为 EXE
+
+在 Windows 上进入项目目录后，直接双击运行：
+
+```bat
+build_windows.bat
+```
+
+脚本会自动：
+
+- 创建 `.venv`
+- 安装运行依赖和 `pyinstaller`
+- 按 `file-organizer.spec` 打包
+- 在 `dist/FileOrganizer.exe` 生成可双击运行的程序
+
+如果你不想在本地打包，也可以把分支推到 GitHub，使用仓库里的 [build-windows-exe.yml](/Users/yanglee/Desktop/file-organizer/.github/workflows/build-windows-exe.yml) 在 GitHub Actions 上构建 Windows EXE。
 
 ### 扫描并分类
 

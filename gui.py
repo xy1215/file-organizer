@@ -3,11 +3,13 @@ from __future__ import annotations
 import os
 import sys
 import webbrowser
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
 import yaml
-from PySide6.QtCore import QProcess, QProcessEnvironment, Qt
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
@@ -28,6 +30,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from main import run_report, run_scan, run_stats, run_summarize
 
 
 CONFIG_PATH = Path("config.yaml")
@@ -63,13 +67,70 @@ def save_config(config: dict[str, Any]) -> None:
         yaml.safe_dump(config, handle, allow_unicode=True, sort_keys=False)
 
 
+class SignalStream(StringIO):
+    def __init__(self, callback) -> None:
+        super().__init__()
+        self.callback = callback
+
+    def write(self, s: str) -> int:
+        if s and s.strip():
+            self.callback(s.rstrip())
+        return len(s)
+
+
+class CommandWorker(QThread):
+    log = Signal(str)
+    finished_status = Signal(bool, str)
+
+    def __init__(self, args: list[str], env: dict[str, str]) -> None:
+        super().__init__()
+        self.args = args
+        self.env = env
+
+    def run(self) -> None:
+        previous_env = os.environ.copy()
+        os.environ.update(self.env)
+        stream = SignalStream(self.log.emit)
+        try:
+            with redirect_stdout(stream), redirect_stderr(stream):
+                self._dispatch()
+        except Exception as exc:
+            self.finished_status.emit(False, f"执行失败：{exc}")
+        else:
+            self.finished_status.emit(True, "")
+        finally:
+            os.environ.clear()
+            os.environ.update(previous_env)
+
+    def _dispatch(self) -> None:
+        if self.args == ["scan"]:
+            run_scan(force=False)
+            return
+        if self.args == ["scan", "--force"]:
+            run_scan(force=True)
+            return
+        if self.args == ["report"]:
+            run_report()
+            return
+        if self.args == ["stats"]:
+            run_stats()
+            return
+        if self.args == ["summarize", "--all"]:
+            run_summarize(summarize_all=True)
+            return
+        if len(self.args) >= 3 and self.args[:2] == ["summarize", "--category"]:
+            run_summarize(category_name=self.args[2])
+            return
+        if len(self.args) >= 3 and self.args[:2] == ["summarize", "--file"]:
+            run_summarize(file_path=self.args[2])
+            return
+        raise RuntimeError(f"不支持的命令: {' '.join(self.args)}")
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.process = QProcess(self)
-        self.process.readyReadStandardOutput.connect(self._read_stdout)
-        self.process.readyReadStandardError.connect(self._read_stderr)
-        self.process.finished.connect(self._on_process_finished)
+        self.worker: CommandWorker | None = None
 
         self.setWindowTitle("文件整理助手")
         self.resize(1100, 760)
@@ -298,7 +359,7 @@ class MainWindow(QMainWindow):
         self._run_command(["summarize", "--file", file_path])
 
     def _run_command(self, args: list[str]) -> None:
-        if self.process.state() != QProcess.NotRunning:
+        if self.worker and self.worker.isRunning():
             QMessageBox.information(self, "任务进行中", "当前已有任务在运行，请等待完成。")
             return
 
@@ -306,40 +367,22 @@ class MainWindow(QMainWindow):
         save_config(config)
         self.log_output.clear()
         self.status_label.setText(f"运行中：{' '.join(args)}")
-        self._append_log(f"$ {sys.executable} main.py {' '.join(args)}")
+        self._append_log(f"开始执行：{' '.join(args)}")
         self._update_run_buttons(running=True)
 
-        env = os.environ.copy()
+        env = dict(os.environ)
         if config["llm"]["api_key"]:
             env["LLM_API_KEY"] = config["llm"]["api_key"]
 
-        self.process.setWorkingDirectory(str(Path.cwd()))
-        self.process.setProgram(sys.executable)
-        self.process.setArguments(["main.py", *args])
-        self.process.setProcessEnvironment(self._build_process_environment(env))
-        self.process.start()
+        self.worker = CommandWorker(args=args, env=env)
+        self.worker.log.connect(self._append_log)
+        self.worker.finished_status.connect(self._on_worker_finished)
+        self.worker.start()
 
-    def _build_process_environment(self, env: dict[str, str]):
-        process_env = QProcessEnvironment.systemEnvironment()
-        for key, value in env.items():
-            process_env.insert(key, value)
-        return process_env
-
-    def _read_stdout(self) -> None:
-        data = bytes(self.process.readAllStandardOutput()).decode("utf-8", errors="ignore")
-        if data:
-            self._append_log(data.rstrip())
-
-    def _read_stderr(self) -> None:
-        data = bytes(self.process.readAllStandardError()).decode("utf-8", errors="ignore")
-        if data:
-            self._append_log(data.rstrip())
-
-    def _on_process_finished(self, exit_code: int) -> None:
-        if exit_code == 0:
-            self.status_label.setText("已完成")
-        else:
-            self.status_label.setText(f"执行失败，退出码 {exit_code}")
+    def _on_worker_finished(self, success: bool, message: str) -> None:
+        self.status_label.setText("已完成" if success else "执行失败")
+        if message:
+            self._append_log(message)
         self._update_run_buttons(running=False)
 
     def _update_run_buttons(self, running: bool = False) -> None:
