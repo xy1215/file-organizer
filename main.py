@@ -96,7 +96,8 @@ def run_scan(force: bool = False) -> None:
                 category = item.get("category")
                 if not file_path or not category:
                     continue
-                cache.update_category(str(file_path), str(category))
+                brief = item.get("brief") or None
+                cache.update_category(str(file_path), str(category), brief=brief)
                 classified += 1
             processed = done
             console.print(f"进度：{done}/{total} - 已分类 {classified} 个文件")
