@@ -100,6 +100,27 @@ class CacheDB:
         )
         self.conn.commit()
 
+    def upsert_files_bulk(self, rows: list[tuple[str, int, float]]) -> int:
+        if not rows:
+            return 0
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.conn:
+            self.conn.executemany(
+                """
+                INSERT INTO file_cache (file_path, file_size, modified_time, category, brief, summary, processed_at)
+                VALUES (?, ?, ?, NULL, NULL, NULL, ?)
+                ON CONFLICT(file_path) DO UPDATE SET
+                    file_size = excluded.file_size,
+                    modified_time = excluded.modified_time,
+                    category = file_cache.category,
+                    brief = file_cache.brief,
+                    summary = file_cache.summary,
+                    processed_at = excluded.processed_at
+                """,
+                [(file_path, file_size, modified_time, now) for file_path, file_size, modified_time in rows],
+            )
+        return len(rows)
+
     def update_category(self, file_path: str, category: str, brief: str | None = None) -> None:
         if brief:
             self.conn.execute(

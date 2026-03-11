@@ -57,14 +57,12 @@ def run_scan(force: bool = False) -> None:
 
         console.print(f"[cyan]扫描完成，发现 {len(scanned_files)} 个符合条件的文件，正在检查缓存...[/cyan]")
         unchanged_paths: set[str] = set()
+        upsert_rows: list[tuple[str, int, float]] = []
         for item in scanned_files:
             if not force and cache.is_unchanged(item.file_path, item.size, item.modified_time):
                 unchanged_paths.add(item.file_path)
-            cache.upsert_file(
-                file_path=item.file_path,
-                file_size=item.size,
-                modified_time=item.modified_time,
-            )
+            upsert_rows.append((item.file_path, item.size, item.modified_time))
+        cache.upsert_files_bulk(upsert_rows)
 
         if force:
             pending = [build_file_stub(item.file_path) for item in scanned_files]
