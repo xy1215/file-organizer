@@ -56,9 +56,6 @@ def run_scan(force: bool = False) -> None:
 
         pending: list[dict[str, Any]] = []
         for item in scanned_files:
-            unchanged = cache.is_unchanged(item.file_path, item.size, item.modified_time)
-            if force or not unchanged:
-                pending.append(build_file_stub(item.file_path))
             cache.upsert_file(
                 file_path=item.file_path,
                 file_size=item.size,
@@ -67,6 +64,12 @@ def run_scan(force: bool = False) -> None:
 
         if force:
             pending = [build_file_stub(item.file_path) for item in scanned_files]
+        else:
+            pending = [
+                build_file_stub(item.file_path)
+                for item in scanned_files
+                if not cache.is_unchanged(item.file_path, item.size, item.modified_time)
+            ]
 
         if not pending:
             console.print(f"[green]扫描完成，共 {len(scanned_files)} 个文件，未发现需要重新分类的文件。[/green]")

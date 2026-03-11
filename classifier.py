@@ -45,7 +45,7 @@ class LLMClient:
             raise ValueError(f"不支持的 LLM provider: {self.provider}")
 
     def _retry(self, func):
-        delays = [1, 2, 4]
+        delays = [0, 1, 2, 4]
         last_error: Exception | None = None
         for index, delay in enumerate(delays, start=1):
             try:
@@ -54,7 +54,8 @@ class LLMClient:
                 last_error = exc
                 if index == len(delays):
                     break
-                time.sleep(delay)
+                if delay > 0:
+                    time.sleep(delay)
         assert last_error is not None
         raise last_error
 

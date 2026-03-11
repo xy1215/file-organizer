@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import sys
 import webbrowser
 from contextlib import redirect_stderr, redirect_stdout
@@ -82,14 +81,11 @@ class CommandWorker(QThread):
     log = Signal(str)
     finished_status = Signal(bool, str)
 
-    def __init__(self, args: list[str], env: dict[str, str]) -> None:
+    def __init__(self, args: list[str]) -> None:
         super().__init__()
         self.args = args
-        self.env = env
 
     def run(self) -> None:
-        previous_env = os.environ.copy()
-        os.environ.update(self.env)
         stream = SignalStream(self.log.emit)
         try:
             with redirect_stdout(stream), redirect_stderr(stream):
@@ -98,9 +94,6 @@ class CommandWorker(QThread):
             self.finished_status.emit(False, f"执行失败：{exc}")
         else:
             self.finished_status.emit(True, "")
-        finally:
-            os.environ.clear()
-            os.environ.update(previous_env)
 
     def _dispatch(self) -> None:
         if self.args == ["scan"]:
@@ -370,11 +363,7 @@ class MainWindow(QMainWindow):
         self._append_log(f"开始执行：{' '.join(args)}")
         self._update_run_buttons(running=True)
 
-        env = dict(os.environ)
-        if config["llm"]["api_key"]:
-            env["LLM_API_KEY"] = config["llm"]["api_key"]
-
-        self.worker = CommandWorker(args=args, env=env)
+        self.worker = CommandWorker(args=args)
         self.worker.log.connect(self._append_log)
         self.worker.finished_status.connect(self._on_worker_finished)
         self.worker.start()
