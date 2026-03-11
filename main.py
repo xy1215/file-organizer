@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,7 +10,7 @@ import yaml
 from rich.console import Console
 
 from cache import CacheDB
-from classifier import LLMClient, build_file_stub, classify_files, classify_files_iter, summarize_text
+from classifier import LLMClient, build_file_stub, classify_files_iter, summarize_text
 from report import generate_reports
 from scanner import scan_files
 from summarizer import UnsupportedSummaryError, extract_text
@@ -45,6 +46,19 @@ def get_batch_size(config: dict[str, Any]) -> int:
     if raw_value < 80 or raw_value > 100:
         console.print("[yellow]batch_size 超出建议范围，已自动调整到 80-100 之间。[/yellow]")
     return min(100, max(80, raw_value))
+
+
+def _normalize_file_path(value: str) -> str:
+    """Normalize file path for matching model output with local batch paths."""
+    raw = value.strip()
+    if not raw:
+        return ""
+    path = Path(raw).expanduser()
+    try:
+        resolved = path.resolve(strict=False)
+    except OSError:
+        resolved = path
+    return os.path.normcase(str(resolved))
 
 
 def run_scan(force: bool = False) -> None:
@@ -100,23 +114,30 @@ def run_scan(force: bool = False) -> None:
 
         classified = 0
         for done, total, batch, batch_results in classify_files_iter(client, pending, batch_size=batch_size):
-            batch_paths = {str(item.get("file_path")) for item in batch if item.get("file_path")}
+            batch_path_map: dict[str, str] = {}
+            for item in batch:
+                batch_file_path = str(item.get("file_path") or "").strip()
+                normalized = _normalize_file_path(batch_file_path)
+                if normalized:
+                    batch_path_map.setdefault(normalized, batch_file_path)
             update_rows: list[tuple[str, str, str | None]] = []
             covered_paths: set[str] = set()
 
             for item in batch_results:
                 file_path = str(item.get("file_path") or "").strip()
                 category = str(item.get("category") or "").strip()
-                if not file_path or not category or file_path not in batch_paths:
+                normalized = _normalize_file_path(file_path)
+                matched_path = batch_path_map.get(normalized)
+                if not normalized or not category or not matched_path:
                     continue
                 brief = str(item.get("brief") or "").strip() or None
-                if file_path in covered_paths:
+                if matched_path in covered_paths:
                     continue
-                covered_paths.add(file_path)
-                update_rows.append((file_path, category, brief))
+                covered_paths.add(matched_path)
+                update_rows.append((matched_path, category, brief))
 
             classified += cache.update_categories_bulk(update_rows)
-            missing = len(batch_paths - covered_paths)
+            missing = len(set(batch_path_map.values()) - covered_paths)
             if missing:
                 console.print(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]")
             console.print(f"进度：{done}/{total} - 已分类 {classified} 个文件")
