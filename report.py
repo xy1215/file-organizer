@@ -746,18 +746,32 @@ def display_brief(record: dict) -> str:
     return brief or "暂时没有简短描述"
 
 
+def _format_modified_time(value: object) -> str:
+    try:
+        timestamp = float(value)
+    except (TypeError, ValueError):
+        return "未知时间"
+    try:
+        return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+    except (OverflowError, OSError, ValueError):
+        return "未知时间"
+
+
 def prepare_records(records: list[dict]) -> list[dict]:
     prepared: list[dict] = []
     for record in records:
-        path = Path(record["file_path"])
+        file_path = str(record.get("file_path") or "")
+        if not file_path:
+            continue
+        path = Path(file_path)
         ext_class, ext_label = _ext_info(path.name)
         prepared.append(
             {
                 **record,
                 "file_name": path.name,
                 "file_size_human": human_size(int(record.get("file_size") or 0)),
-                "modified_at": datetime.fromtimestamp(record["modified_time"]).strftime("%Y-%m-%d %H:%M"),
-                "file_uri": file_uri(record["file_path"]),
+                "modified_at": _format_modified_time(record.get("modified_time")),
+                "file_uri": file_uri(file_path),
                 "ext_class": ext_class,
                 "ext_label": ext_label,
                 "display_brief": display_brief(record),

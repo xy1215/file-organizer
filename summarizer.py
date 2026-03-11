@@ -62,10 +62,28 @@ def extract_text_text(file_path: Path) -> str:
 
 
 def extract_csv_text(file_path: Path) -> str:
+    max_rows = 200
+    max_chars = 3000
+    collected: list[str] = []
+    total_chars = 0
     with file_path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
         reader = csv.reader(handle)
-        rows = [", ".join(row) for row in reader]
-    return _limit_text("\n".join(rows), 3000)
+        for index, row in enumerate(reader, start=1):
+            if index > max_rows:
+                break
+            line = ", ".join(row).strip()
+            if not line:
+                continue
+            remaining = max_chars - total_chars
+            if remaining <= 0:
+                break
+            if len(line) > remaining:
+                line = line[:remaining]
+            collected.append(line)
+            total_chars += len(line) + 1
+            if total_chars >= max_chars:
+                break
+    return "\n".join(collected).strip()
 
 
 def extract_text(file_path: str) -> str:
