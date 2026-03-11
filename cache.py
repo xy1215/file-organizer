@@ -65,12 +65,14 @@ class CacheDB:
 
     def is_unchanged(self, file_path: str, file_size: int, modified_time: float) -> bool:
         row = self.conn.execute(
-            "SELECT file_size, modified_time FROM file_cache WHERE file_path = ?",
+            "SELECT file_size, modified_time, category FROM file_cache WHERE file_path = ?",
             (file_path,),
         ).fetchone()
         if not row:
             return False
-        return row["file_size"] == file_size and row["modified_time"] == modified_time
+        # 未分类文件即使内容未变化，也需要继续进入分类流程，避免永久卡在未分类状态。
+        has_category = bool((row["category"] or "").strip())
+        return row["file_size"] == file_size and row["modified_time"] == modified_time and has_category
 
     def upsert_file(
         self,
@@ -118,6 +120,21 @@ class CacheDB:
                 (category, datetime.now().isoformat(timespec="seconds"), file_path),
             )
         self.conn.commit()
+
+    def update_categories_bulk(self, rows: list[tuple[str, str, str | None]]) -> int:
+        if not rows:
+            return 0
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.conn:
+            self.conn.executemany(
+                """
+                UPDATE file_cache
+                SET category = ?, brief = COALESCE(?, brief), processed_at = ?
+                WHERE file_path = ?
+                """,
+                [(category, brief, now, file_path) for file_path, category, brief in rows],
+            )
+        return len(rows)
 
     def update_summary(self, file_path: str, summary: str) -> None:
         self.conn.execute(

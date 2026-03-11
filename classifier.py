@@ -162,8 +162,8 @@ def classify_files(client: LLMClient, files: list[dict[str, Any]], batch_size: i
 
 def classify_files_iter(
     client: LLMClient, files: list[dict[str, Any]], batch_size: int
-) -> Iterator[tuple[int, int, list[dict[str, Any]]]]:
-    """Yield (completed_count, total_count, batch_results) after each batch."""
+) -> Iterator[tuple[int, int, list[dict[str, Any]], list[dict[str, Any]]]]:
+    """Yield (completed_count, total_count, batch, batch_results) after each batch."""
     batches = chunk_list(files, batch_size)
     total = len(files)
     done = 0
@@ -174,7 +174,7 @@ def classify_files_iter(
         if not isinstance(batch_results, list):
             batch_results = []
         done += len(batch)
-        yield done, total, batch_results
+        yield done, total, batch, batch_results
 
 
 def build_summary_prompt(file_path: str, extracted_text: str) -> str:

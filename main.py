@@ -91,15 +91,26 @@ def run_scan(force: bool = False) -> None:
         console.print(f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
 
         classified = 0
-        for done, total, batch_results in classify_files_iter(client, pending, batch_size=batch_size):
+        for done, total, batch, batch_results in classify_files_iter(client, pending, batch_size=batch_size):
+            batch_paths = {str(item.get("file_path")) for item in batch if item.get("file_path")}
+            update_rows: list[tuple[str, str, str | None]] = []
+            covered_paths: set[str] = set()
+
             for item in batch_results:
-                file_path = item.get("file_path")
-                category = item.get("category")
-                if not file_path or not category:
+                file_path = str(item.get("file_path") or "").strip()
+                category = str(item.get("category") or "").strip()
+                if not file_path or not category or file_path not in batch_paths:
                     continue
-                brief = item.get("brief") or None
-                cache.update_category(str(file_path), str(category), brief=brief)
-                classified += 1
+                brief = str(item.get("brief") or "").strip() or None
+                if file_path in covered_paths:
+                    continue
+                covered_paths.add(file_path)
+                update_rows.append((file_path, category, brief))
+
+            classified += cache.update_categories_bulk(update_rows)
+            missing = len(batch_paths - covered_paths)
+            if missing:
+                console.print(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]")
             console.print(f"进度：{done}/{total} - 已分类 {classified} 个文件")
 
         console.print("[cyan]分类完成，正在生成报告...[/cyan]")
