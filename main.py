@@ -56,8 +56,10 @@ def run_scan(force: bool = False) -> None:
             return
 
         console.print(f"[cyan]扫描完成，发现 {len(scanned_files)} 个符合条件的文件，正在检查缓存...[/cyan]")
-        pending: list[dict[str, Any]] = []
+        unchanged_paths: set[str] = set()
         for item in scanned_files:
+            if not force and cache.is_unchanged(item.file_path, item.size, item.modified_time):
+                unchanged_paths.add(item.file_path)
             cache.upsert_file(
                 file_path=item.file_path,
                 file_size=item.size,
@@ -70,7 +72,7 @@ def run_scan(force: bool = False) -> None:
             pending = [
                 build_file_stub(item.file_path)
                 for item in scanned_files
-                if not cache.is_unchanged(item.file_path, item.size, item.modified_time)
+                if item.file_path not in unchanged_paths
             ]
 
         if not pending:
@@ -89,7 +91,6 @@ def run_scan(force: bool = False) -> None:
         console.print(f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
 
         classified = 0
-        processed = 0
         for done, total, batch_results in classify_files_iter(client, pending, batch_size=batch_size):
             for item in batch_results:
                 file_path = item.get("file_path")
@@ -99,7 +100,6 @@ def run_scan(force: bool = False) -> None:
                 brief = item.get("brief") or None
                 cache.update_category(str(file_path), str(category), brief=brief)
                 classified += 1
-            processed = done
             console.print(f"进度：{done}/{total} - 已分类 {classified} 个文件")
 
         console.print("[cyan]分类完成，正在生成报告...[/cyan]")
