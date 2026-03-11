@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import click
@@ -61,49 +63,118 @@ def _normalize_file_path(value: str) -> str:
     return os.path.normcase(str(resolved))
 
 
-def run_scan(force: bool = False) -> None:
-    config = load_config()
-    cache = get_cache()
+def get_summary_workers(config: dict[str, Any]) -> int:
+    raw = config.get("summary_workers", 4)
     try:
-        console.print("[cyan]正在扫描目录，请稍候...[/cyan]")
-        scanned_files = scan_files(
-            paths=config.get("scan", {}).get("paths", []),
-            exclude_patterns=config.get("scan", {}).get("exclude_patterns", []),
-        )
-        if not scanned_files:
-            console.print("[yellow]没有扫描到符合条件的文件。[/yellow]")
-            return
+        value = int(raw or 4)
+    except (TypeError, ValueError):
+        console.print("[yellow]summary_workers 配置无效，已使用默认值 4。[/yellow]")
+        value = 4
+    return min(8, max(1, value))
 
-        console.print(f"[cyan]扫描完成，发现 {len(scanned_files)} 个符合条件的文件，正在检查缓存...[/cyan]")
-        scanned_paths = {item.file_path for item in scanned_files}
-        removed = cache.delete_absent_files(scanned_paths)
-        if removed:
-            console.print(f"[cyan]已清理 {removed} 条失效缓存记录（源文件不存在）。[/cyan]")
 
-        unchanged_paths: set[str] = set()
-        upsert_rows: list[tuple[str, int, float]] = []
-        for item in scanned_files:
-            if not force and cache.is_unchanged(item.file_path, item.size, item.modified_time):
-                unchanged_paths.add(item.file_path)
-            upsert_rows.append((item.file_path, item.size, item.modified_time))
-        cache.upsert_files_bulk(upsert_rows)
+def _select_summary_targets(
+    cache: CacheDB,
+    *,
+    category_name: str | None = None,
+    file_path: str | None = None,
+    summarize_all: bool = False,
+    force: bool = False,
+    candidate_paths: list[str] | None = None,
+) -> list[str]:
+    if candidate_paths is not None:
+        targets: list[str] = []
+        for path in candidate_paths:
+            record = cache.get(path)
+            if record and (record.category or "").strip():
+                targets.append(path)
+        return sorted(dict.fromkeys(targets))
 
+    if file_path:
+        return [str(Path(file_path).expanduser().resolve())]
+
+    if category_name:
+        records = cache.list_by_category(category_name)
         if force:
-            pending = [build_file_stub(item.file_path) for item in scanned_files]
+            return [record["file_path"] for record in records]
+        return [
+            record["file_path"]
+            for record in records
+            if not str(record.get("summary") or "").strip()
+        ]
+
+    if summarize_all:
+        records = [record for record in cache.list_all() if record.get("category")]
+        if force:
+            return [record["file_path"] for record in records]
+        return [
+            record["file_path"]
+            for record in records
+            if not str(record.get("summary") or "").strip()
+        ]
+
+    return []
+
+
+def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = False) -> dict[str, Any]:
+    console.print("[cyan]正在扫描目录，请稍候...[/cyan]")
+    scanned_files = scan_files(
+        paths=config.get("scan", {}).get("paths", []),
+        exclude_patterns=config.get("scan", {}).get("exclude_patterns", []),
+    )
+    if not scanned_files:
+        console.print("[yellow]没有扫描到符合条件的文件。[/yellow]")
+        return {
+            "scanned_files": [],
+            "changed_paths": [],
+            "summary_targets": [],
+            "classified": 0,
+        }
+
+    console.print(f"[cyan]扫描完成，发现 {len(scanned_files)} 个符合条件的文件，正在检查缓存...[/cyan]")
+    existing_records = cache.index_by_path()
+    scanned_paths = {item.file_path for item in scanned_files}
+    removed = cache.delete_absent_files(scanned_paths)
+    if removed:
+        console.print(f"[cyan]已清理 {removed} 条失效缓存记录（源文件不存在）。[/cyan]")
+
+    unchanged_paths: set[str] = set()
+    upsert_rows: list[tuple[str, int, float]] = []
+    changed_paths: list[str] = []
+    summary_candidates: set[str] = set()
+    for item in scanned_files:
+        record = existing_records.get(item.file_path)
+        unchanged = (
+            not force
+            and record is not None
+            and record.file_size == item.size
+            and record.modified_time == item.modified_time
+            and bool((record.category or "").strip())
+        )
+        if unchanged:
+            unchanged_paths.add(item.file_path)
         else:
-            pending = [
-                build_file_stub(item.file_path)
-                for item in scanned_files
-                if item.file_path not in unchanged_paths
-            ]
+            changed_paths.append(item.file_path)
+        if force or record is None or not str(record.summary or "").strip() or item.file_path in changed_paths:
+            summary_candidates.add(item.file_path)
+        upsert_rows.append((item.file_path, item.size, item.modified_time))
 
-        if not pending:
-            console.print(f"[green]扫描完成，共 {len(scanned_files)} 个文件，未发现需要重新分类的文件。[/green]")
-            console.print("[cyan]正在刷新报告...[/cyan]")
-            generate_reports(cache.list_all())
-            console.print("[green]已刷新 report.html 和 report.json。[/green]")
-            return
+    cache.upsert_files_bulk(upsert_rows)
+    if changed_paths:
+        cache.clear_summaries_bulk(changed_paths)
 
+    if force:
+        pending = [build_file_stub(item.file_path) for item in scanned_files]
+    else:
+        pending = [
+            build_file_stub(item.file_path)
+            for item in scanned_files
+            if item.file_path not in unchanged_paths
+        ]
+
+    if not pending:
+        console.print(f"[green]扫描完成，共 {len(scanned_files)} 个文件，未发现需要重新分类的文件。[/green]")
+    else:
         try:
             client = LLMClient(config)
         except ValueError as exc:
@@ -141,31 +212,29 @@ def run_scan(force: bool = False) -> None:
             if missing:
                 console.print(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]")
             console.print(f"进度：{done}/{total} - 已分类 {classified} 个文件")
+    classified = len([path for path in scanned_files if path.file_path not in unchanged_paths])
+    summary_targets = _select_summary_targets(cache, candidate_paths=list(summary_candidates))
+    return {
+        "scanned_files": scanned_files,
+        "changed_paths": changed_paths,
+        "summary_targets": summary_targets,
+        "classified": classified,
+    }
 
-        console.print("[cyan]分类完成，正在生成报告...[/cyan]")
-        generate_reports(cache.list_all())
-        console.print(
-            f"[green]扫描完成。总扫描 {len(scanned_files)} 个文件，本次分类 {classified} 个文件。[/green]"
-        )
-        console.print("[green]已生成 report.html 和 report.json。[/green]")
-    finally:
-        cache.close()
 
-
-def _summarize_file(cache: CacheDB, client: LLMClient, file_path: str) -> tuple[bool, str]:
-    record = cache.get(file_path)
+def _summarize_file(config: dict[str, Any], file_path: str, client_local: threading.local) -> tuple[bool, str]:
     path = Path(file_path)
     if not path.exists():
         return False, f"文件不存在：{file_path}"
-    if not record:
-        stat = path.stat()
-        cache.upsert_file(str(path), stat.st_size, stat.st_mtime)
     try:
         extracted = extract_text(file_path)
         if not extracted.strip():
             return False, f"无法提取有效文本：{file_path}"
+        client = getattr(client_local, "client", None)
+        if client is None:
+            client = LLMClient(config)
+            client_local.client = client
         summary = summarize_text(client, file_path, extracted)
-        cache.update_summary(file_path, summary)
         return True, summary
     except UnsupportedSummaryError as exc:
         return False, str(exc)
@@ -174,10 +243,58 @@ def _summarize_file(cache: CacheDB, client: LLMClient, file_path: str) -> tuple[
         return False, f"摘要失败：{exc}"
 
 
+def _run_summary_jobs(cache: CacheDB, config: dict[str, Any], targets: list[str]) -> tuple[int, int]:
+    if not targets:
+        console.print("[yellow]没有找到需要生成摘要的文件。[/yellow]")
+        return 0, 0
+
+    workers = min(get_summary_workers(config), len(targets))
+    console.print(
+        f"[cyan]已找到 {len(targets)} 个目标文件，开始生成摘要（并发 {workers}）...[/cyan]"
+    )
+    success = 0
+    completed = 0
+    client_local = threading.local()
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {
+            executor.submit(_summarize_file, config, target, client_local): target
+            for target in targets
+        }
+        for future in as_completed(future_map):
+            target = future_map[future]
+            completed += 1
+            ok, message = future.result()
+            console.print(f"[cyan]进度：{completed}/{len(targets)} - 已完成 {Path(target).name}[/cyan]")
+            if ok:
+                success += 1
+                cache.update_summary(target, message)
+            else:
+                logging.error("摘要失败: %s | %s", target, message)
+            console.print(message)
+    return success, len(targets)
+
+
+def run_scan(force: bool = False) -> None:
+    config = load_config()
+    cache = get_cache()
+    try:
+        result = _scan_and_classify(cache, config, force=force)
+        if not result["scanned_files"]:
+            return
+        console.print("[cyan]正在刷新报告...[/cyan]")
+        generate_reports(cache.list_all())
+        classified = result["classified"]
+        console.print(f"[green]扫描完成。总扫描 {len(result['scanned_files'])} 个文件，本次分类 {classified} 个文件。[/green]")
+        console.print("[green]已生成 report.html 和 report.json。[/green]")
+    finally:
+        cache.close()
+
+
 def run_summarize(
     category_name: str | None = None,
     file_path: str | None = None,
     summarize_all: bool = False,
+    force: bool = False,
 ) -> None:
     selected = sum(bool(value) for value in [category_name, file_path, summarize_all])
     if selected != 1:
@@ -186,37 +303,48 @@ def run_summarize(
     config = load_config()
     cache = get_cache()
     try:
-        try:
-            client = LLMClient(config)
-        except ValueError as exc:
-            raise click.ClickException(str(exc)) from exc
-
-        targets: list[str] = []
         if file_path:
-            targets = [str(Path(file_path).expanduser().resolve())]
-        elif category_name:
-            targets = [record["file_path"] for record in cache.list_by_category(category_name)]
-        elif summarize_all:
-            targets = [record["file_path"] for record in cache.list_all() if record.get("category")]
-
-        if not targets:
-            console.print("[yellow]没有找到需要生成摘要的文件。[/yellow]")
+            record = cache.get(str(Path(file_path).expanduser().resolve()))
+            if not record:
+                path = Path(file_path).expanduser().resolve()
+                if path.exists():
+                    stat = path.stat()
+                    cache.upsert_file(str(path), stat.st_size, stat.st_mtime)
+        targets = _select_summary_targets(
+            cache,
+            category_name=category_name,
+            file_path=file_path,
+            summarize_all=summarize_all,
+            force=force,
+        )
+        success, total = _run_summary_jobs(cache, config, targets)
+        if not total:
             return
-
-        console.print(f"[cyan]已找到 {len(targets)} 个目标文件，开始生成摘要...[/cyan]")
-        success = 0
-        for index, target in enumerate(targets, start=1):
-            console.print(f"[cyan]进度：{index}/{len(targets)} - 正在处理 {Path(target).name}[/cyan]")
-            ok, message = _summarize_file(cache, client, target)
-            if ok:
-                success += 1
-            else:
-                logging.error("摘要失败: %s | %s", target, message)
-            console.print(message)
-
         console.print("[cyan]摘要生成完成，正在刷新报告...[/cyan]")
         generate_reports(cache.list_all())
-        console.print(f"[green]摘要任务完成，成功 {success}/{len(targets)}。[/green]")
+        console.print(f"[green]摘要任务完成，成功 {success}/{total}。[/green]")
+    finally:
+        cache.close()
+
+
+def run_sync(force_scan: bool = False, force_summary: bool = False) -> None:
+    config = load_config()
+    cache = get_cache()
+    try:
+        result = _scan_and_classify(cache, config, force=force_scan)
+        scanned_files = result["scanned_files"]
+        if not scanned_files:
+            return
+        targets = result["summary_targets"]
+        if force_summary:
+            targets = _select_summary_targets(cache, summarize_all=True, force=True)
+        success, total = _run_summary_jobs(cache, config, targets)
+        console.print("[cyan]正在刷新报告...[/cyan]")
+        generate_reports(cache.list_all())
+        console.print(
+            f"[green]同步完成。总扫描 {len(scanned_files)} 个文件，本次分类 {result['classified']} 个文件，摘要成功 {success}/{total}。[/green]"
+        )
+        console.print("[green]已生成 report.html 和 report.json。[/green]")
     finally:
         cache.close()
 
@@ -262,9 +390,18 @@ def scan(force: bool) -> None:
 @click.option("--category", "category_name", type=str, help="为指定分类生成摘要")
 @click.option("--file", "file_path", type=str, help="为单个文件生成摘要")
 @click.option("--all", "summarize_all", is_flag=True, help="为所有已分类文件生成摘要")
-def summarize(category_name: str | None, file_path: str | None, summarize_all: bool) -> None:
+@click.option("--force", is_flag=True, help="即使已有摘要也重新生成")
+def summarize(category_name: str | None, file_path: str | None, summarize_all: bool, force: bool) -> None:
     """生成摘要"""
-    run_summarize(category_name=category_name, file_path=file_path, summarize_all=summarize_all)
+    run_summarize(category_name=category_name, file_path=file_path, summarize_all=summarize_all, force=force)
+
+
+@cli.command()
+@click.option("--force-scan", is_flag=True, help="强制重新分类所有文件")
+@click.option("--force-summary", is_flag=True, help="强制重新生成所有摘要")
+def sync(force_scan: bool, force_summary: bool) -> None:
+    """增量扫描、摘要并刷新报告"""
+    run_sync(force_scan=force_scan, force_summary=force_summary)
 
 
 @cli.command()

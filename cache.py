@@ -168,6 +168,23 @@ class CacheDB:
         )
         self.conn.commit()
 
+    def clear_summaries_bulk(self, file_paths: list[str]) -> int:
+        if not file_paths:
+            return 0
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.conn:
+            for chunk in self._chunked(file_paths, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                self.conn.execute(
+                    f"""
+                    UPDATE file_cache
+                    SET summary = NULL, processed_at = ?
+                    WHERE file_path IN ({placeholders})
+                    """,
+                    (now, *chunk),
+                )
+        return len(file_paths)
+
     @staticmethod
     def _chunked(items: list[str], size: int) -> list[list[str]]:
         return [items[i : i + size] for i in range(0, len(items), size)]
@@ -204,6 +221,13 @@ class CacheDB:
             (category,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def index_by_path(self) -> dict[str, CacheRecord]:
+        rows = self.conn.execute("SELECT * FROM file_cache").fetchall()
+        return {
+            row["file_path"]: CacheRecord(**dict(row))
+            for row in rows
+        }
 
     def stats(self) -> dict[str, Any]:
         total = self.conn.execute("SELECT COUNT(*) AS c FROM file_cache").fetchone()["c"]

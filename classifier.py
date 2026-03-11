@@ -46,7 +46,7 @@ class LLMClient:
     def __init__(self, config: dict[str, Any]) -> None:
         llm_config = config.get("llm", {})
         self.provider = (llm_config.get("provider") or "openai").lower()
-        self.api_key = llm_config.get("api_key") or os.getenv("LLM_API_KEY", "")
+        self.api_key = self._resolve_api_key(llm_config)
         self.model = llm_config.get("model") or "gpt-4o-mini"
         self.summary_model = llm_config.get("summary_model") or self.model
         self.base_url = llm_config.get("base_url") or None
@@ -64,6 +64,23 @@ class LLMClient:
             self.openai_client = None
         else:
             raise ValueError(f"不支持的 LLM provider: {self.provider}")
+
+    def _resolve_api_key(self, llm_config: dict[str, Any]) -> str:
+        configured_key = str(llm_config.get("api_key") or "").strip()
+        if configured_key:
+            return configured_key
+
+        fallback_env_vars = ["LLM_API_KEY"]
+        if self.provider == "openai":
+            fallback_env_vars.append("OPENAI_API_KEY")
+        elif self.provider == "anthropic":
+            fallback_env_vars.append("ANTHROPIC_API_KEY")
+
+        for env_name in fallback_env_vars:
+            value = os.getenv(env_name, "").strip()
+            if value:
+                return value
+        return ""
 
     def _retry(self, func):
         delays = [0, 1, 2, 4]

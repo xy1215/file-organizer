@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 import webbrowser
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
@@ -9,10 +10,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import QThread, Qt, QTimer, Signal
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -33,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 from main import run_report, run_scan, run_stats, run_summarize
+from main import run_sync
 
 
 CONFIG_PATH = Path("config.yaml")
@@ -53,6 +56,11 @@ def default_config() -> dict[str, Any]:
             "exclude_patterns": ["node_modules", ".git", "__pycache__", "AppData"],
         },
         "batch_size": 80,
+        "summary_workers": 4,
+        "automation": {
+            "auto_scan_enabled": False,
+            "interval_minutes": 60,
+        },
     }
 
 
@@ -118,6 +126,9 @@ class CommandWorker(QThread):
         if self.args == ["stats"]:
             run_stats()
             return
+        if self.args == ["sync"]:
+            run_sync()
+            return
         if self.args == ["summarize", "--all"]:
             run_summarize(summarize_all=True)
             return
@@ -134,6 +145,14 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.worker: CommandWorker | None = None
+        self.current_total = 0
+        self.current_progress = 0
+        self.started_at: float | None = None
+        self.elapsed_timer = QTimer(self)
+        self.elapsed_timer.setInterval(1000)
+        self.elapsed_timer.timeout.connect(self._refresh_elapsed_time)
+        self.auto_scan_timer = QTimer(self)
+        self.auto_scan_timer.timeout.connect(self._trigger_auto_sync)
 
         self.setWindowTitle("文件整理助手")
         self.resize(1100, 760)
@@ -178,6 +197,12 @@ class MainWindow(QMainWindow):
         self.base_url_input = QLineEdit()
         self.batch_size_input = QSpinBox()
         self.batch_size_input.setRange(80, 100)
+        self.summary_workers_input = QSpinBox()
+        self.summary_workers_input.setRange(1, 8)
+        self.auto_scan_checkbox = QCheckBox("开启每小时自动巡检")
+        self.auto_scan_interval_input = QSpinBox()
+        self.auto_scan_interval_input.setRange(15, 1440)
+        self.auto_scan_interval_input.setSuffix(" 分钟")
 
         form.addRow("服务商", self.provider_input)
         form.addRow("API Key", self.api_key_input)
@@ -185,6 +210,9 @@ class MainWindow(QMainWindow):
         form.addRow("摘要模型", self.summary_model_input)
         form.addRow("Base URL", self.base_url_input)
         form.addRow("批次大小", self.batch_size_input)
+        form.addRow("摘要并发", self.summary_workers_input)
+        form.addRow("自动巡检", self.auto_scan_checkbox)
+        form.addRow("巡检间隔", self.auto_scan_interval_input)
         layout.addLayout(form)
 
         path_row = QHBoxLayout()
@@ -229,6 +257,8 @@ class MainWindow(QMainWindow):
         self.open_report_button.clicked.connect(self._open_report)
         self.stats_button = QPushButton("查看缓存统计")
         self.stats_button.clicked.connect(lambda: self._run_command(["stats"]))
+        self.sync_button = QPushButton("增量巡检并刷新报告")
+        self.sync_button.clicked.connect(lambda: self._run_command(["sync"]))
 
         summarize_box = QGroupBox("摘要")
         summarize_layout = QVBoxLayout(summarize_box)
@@ -263,6 +293,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.report_button)
         layout.addWidget(self.open_report_button)
         layout.addWidget(self.stats_button)
+        layout.addWidget(self.sync_button)
         layout.addWidget(summarize_box)
         layout.addStretch(1)
         return box
@@ -274,6 +305,10 @@ class MainWindow(QMainWindow):
         self.status_label.setStyleSheet("font-weight: 600;")
         self.phase_label = QLabel("等待开始")
         self.phase_label.setStyleSheet("color: #586271;")
+        self.elapsed_label = QLabel("耗时：00:00")
+        self.elapsed_label.setStyleSheet("color: #586271;")
+        self.progress_detail_label = QLabel("进度：未开始")
+        self.progress_detail_label.setStyleSheet("color: #586271;")
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
@@ -286,6 +321,8 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self.status_label)
         layout.addWidget(self.phase_label)
+        layout.addWidget(self.elapsed_label)
+        layout.addWidget(self.progress_detail_label)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.log_output, stretch=1)
         layout.addWidget(clear_button, alignment=Qt.AlignRight)
@@ -294,17 +331,22 @@ class MainWindow(QMainWindow):
     def _load_into_form(self, config: dict[str, Any]) -> None:
         llm = config.get("llm", {})
         scan = config.get("scan", {})
+        automation = config.get("automation", {})
         self.provider_input.setText(str(llm.get("provider", "openai")))
         self.api_key_input.setText(str(llm.get("api_key", "")))
         self.model_input.setText(str(llm.get("model", "gpt-4o-mini")))
         self.summary_model_input.setText(str(llm.get("summary_model", "gpt-4o-mini")))
         self.base_url_input.setText(str(llm.get("base_url", "")))
         self.batch_size_input.setValue(normalize_batch_size(config.get("batch_size", 80)))
+        self.summary_workers_input.setValue(max(1, min(8, int(config.get("summary_workers", 4) or 4))))
+        self.auto_scan_checkbox.setChecked(bool(automation.get("auto_scan_enabled", False)))
+        self.auto_scan_interval_input.setValue(max(15, min(1440, int(automation.get("interval_minutes", 60) or 60))))
 
         self.path_list.clear()
         for path in scan.get("paths", []):
             self.path_list.addItem(QListWidgetItem(str(path)))
         self.exclude_input.setPlainText("\n".join(scan.get("exclude_patterns", [])))
+        self._sync_auto_scan_timer()
 
     def _build_config_from_form(self) -> dict[str, Any]:
         return {
@@ -324,11 +366,17 @@ class MainWindow(QMainWindow):
                 ],
             },
             "batch_size": self.batch_size_input.value(),
+            "summary_workers": self.summary_workers_input.value(),
+            "automation": {
+                "auto_scan_enabled": self.auto_scan_checkbox.isChecked(),
+                "interval_minutes": self.auto_scan_interval_input.value(),
+            },
         }
 
     def _save_form_config(self) -> None:
         config = self._build_config_from_form()
         save_config(config)
+        self._sync_auto_scan_timer()
         self._append_log("配置已保存到 config.yaml")
         QMessageBox.information(self, "保存成功", "配置已保存。")
 
@@ -377,11 +425,18 @@ class MainWindow(QMainWindow):
 
         config = self._build_config_from_form()
         save_config(config)
+        self._sync_auto_scan_timer()
         self.current_command = list(args)
+        self.current_total = 0
+        self.current_progress = 0
+        self.started_at = time.monotonic()
         self.log_output.clear()
         self.status_label.setText(f"运行中：{' '.join(args)}")
         self.phase_label.setText("任务已启动，正在准备...")
+        self.elapsed_label.setText("耗时：00:00")
+        self.progress_detail_label.setText("进度：准备中")
         self._set_busy_progress()
+        self.elapsed_timer.start()
         self._append_log(f"开始执行：{' '.join(args)}")
         self._update_run_buttons(running=True)
 
@@ -391,8 +446,15 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _on_worker_finished(self, success: bool, message: str) -> None:
+        self.elapsed_timer.stop()
+        self._refresh_elapsed_time()
         self.status_label.setText("已完成" if success else "执行失败")
         self.phase_label.setText("任务完成" if success else "任务失败")
+        if self.current_total:
+            final_progress = self.current_total if success else self.current_progress
+            self.progress_detail_label.setText(f"进度：{final_progress}/{self.current_total}")
+        else:
+            self.progress_detail_label.setText("进度：已完成" if success else "进度：已中断")
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100 if success else 0)
         self.progress_bar.setFormat("完成" if success else "失败")
@@ -409,6 +471,7 @@ class MainWindow(QMainWindow):
             self.force_scan_button,
             self.report_button,
             self.stats_button,
+            self.sync_button,
             self.run_summary_button,
         ]:
             button.setEnabled(enabled)
@@ -459,11 +522,21 @@ class MainWindow(QMainWindow):
         if match:
             current = int(match.group(1))
             total = int(match.group(2))
+            self.current_progress = current
+            self.current_total = total
             value = int(current * 100 / total) if total else 0
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(value)
             self.progress_bar.setFormat(f"{current}/{total}")
+            self.progress_detail_label.setText(f"进度：{current}/{total}")
             self.phase_label.setText(plain)
+            return
+
+        total_match = re.search(r"共\s+(\d+)\s+个文件待处理", plain)
+        if total_match:
+            self.current_total = int(total_match.group(1))
+            self.current_progress = 0
+            self.progress_detail_label.setText(f"进度：0/{self.current_total}")
             return
 
         if "执行失败" in plain or "摘要失败" in plain:
@@ -474,6 +547,33 @@ class MainWindow(QMainWindow):
 
     def _strip_rich_markup(self, message: str) -> str:
         return re.sub(r"\[[^\]]+\]", "", message).strip()
+
+    def _refresh_elapsed_time(self) -> None:
+        if self.started_at is None:
+            self.elapsed_label.setText("耗时：00:00")
+            return
+        seconds = max(0, int(time.monotonic() - self.started_at))
+        minutes, remaining = divmod(seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours:
+            self.elapsed_label.setText(f"耗时：{hours:02d}:{minutes:02d}:{remaining:02d}")
+            return
+        self.elapsed_label.setText(f"耗时：{minutes:02d}:{remaining:02d}")
+
+    def _sync_auto_scan_timer(self) -> None:
+        if not self.auto_scan_checkbox.isChecked():
+            self.auto_scan_timer.stop()
+            return
+        interval_ms = self.auto_scan_interval_input.value() * 60 * 1000
+        self.auto_scan_timer.start(interval_ms)
+
+    def _trigger_auto_sync(self) -> None:
+        if self.worker and self.worker.isRunning():
+            return
+        self._append_log(
+            f"自动巡检触发：每 {self.auto_scan_interval_input.value()} 分钟执行一次增量扫描、摘要与报告刷新。"
+        )
+        self._run_command(["sync"])
 
 
 def run_gui() -> int:

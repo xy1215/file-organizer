@@ -379,6 +379,19 @@ HTML_TEMPLATE = Template(
       margin-bottom: 6px;
       word-break: break-word;
     }
+    .detail-source {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      color: #6a5643;
+      background: rgba(210, 141, 82, 0.14);
+      border: 1px solid rgba(210, 141, 82, 0.24);
+    }
     .detail-summary {
       margin-top: 10px;
       padding-top: 10px;
@@ -553,10 +566,14 @@ HTML_TEMPLATE = Template(
       detailTitle.textContent = category.name;
       detailSubtitle.textContent = `${category.count} 个文件 · ${category.top_types || '混合文件类型'}`;
       detailList.innerHTML = category.files.map((file) => {
+        const hasSummary = Boolean(file.summary);
+        const source = hasSummary
+          ? '<div class="detail-source">已读取正文生成摘要</div>'
+          : '<div class="detail-source">当前仅根据文件名和路径推测</div>';
         const brief = file.display_brief
           ? `<div class="detail-brief">${escapeHtml(file.display_brief)}</div>`
           : '';
-        const summary = file.summary
+        const summary = hasSummary
           ? `<div class="detail-summary">${escapeHtml(file.summary)}</div>`
           : '';
         return `
@@ -564,6 +581,7 @@ HTML_TEMPLATE = Template(
             <div class="icon-badge ${escapeHtml(file.ext_class)}">${escapeHtml(file.ext_label)}</div>
             <div class="detail-main">
               <div class="detail-file">${escapeHtml(file.file_name)}</div>
+              ${source}
               ${brief}
               <div class="detail-meta">${escapeHtml(file.modified_at)} · <a href="${escapeHtml(file.file_uri)}">${escapeHtml(file.file_path)}</a></div>
               ${summary}
