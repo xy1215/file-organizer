@@ -203,5 +203,13 @@ def stats() -> None:
         cache.close()
 
 
+@cli.command()
+def gui() -> None:
+    """启动图形界面"""
+    from gui import run_gui
+
+    raise SystemExit(run_gui())
+
+
 if __name__ == "__main__":
     cli()

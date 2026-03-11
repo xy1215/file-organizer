@@ -7,4 +7,5 @@ pymupdf
 python-docx
 python-pptx
 pyyaml
+PySide6
 rich
