@@ -1,0 +1,19 @@
+# LLM API 配置
+llm:
+  provider: "openai"
+  api_key: ""
+  model: "gpt-4o-mini"
+  summary_model: "gpt-4o-mini"
+  base_url: ""
+
+# 扫描配置
+scan:
+  paths: []
+  exclude_patterns:
+    - "node_modules"
+    - ".git"
+    - "__pycache__"
+    - "AppData"
+
+# 分类批次大小
+batch_size: 80

@@ -1,0 +1,10 @@
+anthropic
+click
+jinja2
+openai
+openpyxl
+pymupdf
+python-docx
+python-pptx
+pyyaml
+rich
