@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import re
 import sys
+import threading
 import time
 import webbrowser
-from contextlib import redirect_stderr, redirect_stdout
-from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from main import run_report, run_scan, run_stats, run_summarize
+from main import OperationCancelled, RuntimeHooks, run_report, run_scan, run_stats, run_summarize
 from main import run_sync
 
 
@@ -164,59 +163,58 @@ def normalize_auto_scan_interval(raw_value: Any) -> int:
     return min(1440, max(15, value))
 
 
-class SignalStream(StringIO):
-    def __init__(self, callback) -> None:
-        super().__init__()
-        self.callback = callback
-
-    def write(self, s: str) -> int:
-        if s and s.strip():
-            self.callback(s.rstrip())
-        return len(s)
-
-
 class CommandWorker(QThread):
     log = Signal(str)
+    progress = Signal(str, int, int, str)
     finished_status = Signal(bool, str)
 
     def __init__(self, args: list[str]) -> None:
         super().__init__()
         self.args = args
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
 
     def run(self) -> None:
-        stream = SignalStream(self.log.emit)
         try:
-            with redirect_stdout(stream), redirect_stderr(stream):
-                self._dispatch()
+            self._dispatch()
+        except OperationCancelled:
+            self.finished_status.emit(False, "任务已取消。")
         except Exception as exc:
             self.finished_status.emit(False, f"执行失败：{exc}")
         else:
             self.finished_status.emit(True, "")
 
     def _dispatch(self) -> None:
+        hooks = RuntimeHooks(
+            log=self.log.emit,
+            progress=self.progress.emit,
+            is_cancelled=self._cancel_event.is_set,
+        )
         if self.args == ["scan"]:
-            run_scan(force=False)
+            run_scan(force=False, hooks=hooks)
             return
         if self.args == ["scan", "--force"]:
-            run_scan(force=True)
+            run_scan(force=True, hooks=hooks)
             return
         if self.args == ["report"]:
-            run_report()
+            run_report(hooks=hooks)
             return
         if self.args == ["stats"]:
-            run_stats()
+            run_stats(hooks=hooks)
             return
         if self.args == ["sync"]:
-            run_sync()
+            run_sync(hooks=hooks)
             return
         if self.args == ["summarize", "--all"]:
-            run_summarize(summarize_all=True)
+            run_summarize(summarize_all=True, hooks=hooks)
             return
         if len(self.args) >= 3 and self.args[:2] == ["summarize", "--category"]:
-            run_summarize(category_name=self.args[2])
+            run_summarize(category_name=self.args[2], hooks=hooks)
             return
         if len(self.args) >= 3 and self.args[:2] == ["summarize", "--file"]:
-            run_summarize(file_path=self.args[2])
+            run_summarize(file_path=self.args[2], hooks=hooks)
             return
         raise RuntimeError(f"不支持的命令: {' '.join(self.args)}")
 
@@ -344,6 +342,9 @@ class MainWindow(QMainWindow):
         self.stats_button.clicked.connect(lambda: self._run_command(["stats"]))
         self.sync_button = QPushButton("增量巡检并刷新报告")
         self.sync_button.clicked.connect(lambda: self._run_command(["sync"]))
+        self.cancel_button = QPushButton("取消当前任务")
+        self.cancel_button.clicked.connect(self._cancel_running_task)
+        self.cancel_button.setEnabled(False)
 
         summarize_box = QGroupBox("摘要")
         summarize_layout = QVBoxLayout(summarize_box)
@@ -379,6 +380,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.open_report_button)
         layout.addWidget(self.stats_button)
         layout.addWidget(self.sync_button)
+        layout.addWidget(self.cancel_button)
         layout.addWidget(summarize_box)
         layout.addStretch(1)
         return box
@@ -533,27 +535,30 @@ class MainWindow(QMainWindow):
 
         self.worker = CommandWorker(args=args)
         self.worker.log.connect(self._append_log)
+        self.worker.progress.connect(self._apply_progress_update)
         self.worker.finished_status.connect(self._on_worker_finished)
         self.worker.start()
 
     def _on_worker_finished(self, success: bool, message: str) -> None:
         self.elapsed_timer.stop()
         self._refresh_elapsed_time()
-        self.status_label.setText("已完成" if success else "执行失败")
-        self.phase_label.setText("任务完成" if success else "任务失败")
+        cancelled = message == "任务已取消。"
+        self.status_label.setText("已完成" if success else ("已取消" if cancelled else "执行失败"))
+        self.phase_label.setText("任务完成" if success else ("任务已取消" if cancelled else "任务失败"))
         if self.current_total:
             final_progress = self.current_total if success else self.current_progress
             self.progress_detail_label.setText(f"进度：{final_progress}/{self.current_total}")
         else:
-            self.progress_detail_label.setText("进度：已完成" if success else "进度：已中断")
+            self.progress_detail_label.setText("进度：已完成" if success else ("进度：已取消" if cancelled else "进度：已中断"))
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100 if success else 0)
-        self.progress_bar.setFormat("完成" if success else "失败")
+        self.progress_bar.setFormat("完成" if success else ("已取消" if cancelled else "失败"))
         if message:
             self._append_log(message)
         elif success:
             self._append_log("任务执行完成。")
         self._update_run_buttons(running=False)
+        self.worker = None
 
     def _update_run_buttons(self, running: bool = False) -> None:
         enabled = not running
@@ -566,6 +571,15 @@ class MainWindow(QMainWindow):
             self.run_summary_button,
         ]:
             button.setEnabled(enabled)
+        self.cancel_button.setEnabled(running)
+
+    def _cancel_running_task(self) -> None:
+        if not self.worker or not self.worker.isRunning():
+            return
+        self.worker.cancel()
+        self._append_log("已请求取消当前任务，正在等待当前步骤安全结束...")
+        self.phase_label.setText("正在取消任务...")
+        self.cancel_button.setEnabled(False)
 
     def _open_report(self) -> None:
         if not REPORT_PATH.exists():
@@ -583,6 +597,42 @@ class MainWindow(QMainWindow):
     def _set_busy_progress(self) -> None:
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setFormat("处理中...")
+
+    def _apply_progress_update(self, phase: str, current: int, total: int, detail: str) -> None:
+        if phase == "scan":
+            self.phase_label.setText(detail or "正在扫描目录...")
+            self._set_busy_progress()
+            return
+        if phase == "classify":
+            self.current_progress = current
+            self.current_total = total
+            value = int(current * 100 / total) if total else 0
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(value)
+            self.progress_bar.setFormat(f"{current}/{total}")
+            self.progress_detail_label.setText(f"进度：{current}/{total}")
+            self.phase_label.setText(detail or "正在调用模型进行分类...")
+            return
+        if phase == "summarize":
+            self.current_progress = current
+            self.current_total = total
+            value = int(current * 100 / total) if total else 0
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(value)
+            self.progress_bar.setFormat(f"{current}/{total}")
+            self.progress_detail_label.setText(f"进度：{current}/{total}")
+            self.phase_label.setText(detail or "正在生成摘要...")
+            return
+        if phase == "report":
+            self.phase_label.setText(detail or "正在生成报告...")
+            self._set_busy_progress()
+            return
+        if phase == "stats":
+            self.phase_label.setText(detail or "正在读取缓存统计...")
+            self._set_busy_progress()
+            return
+        if phase == "done":
+            self.phase_label.setText(detail or "任务完成")
 
     def _update_progress_from_log(self, message: str) -> None:
         plain = self._strip_rich_markup(message)

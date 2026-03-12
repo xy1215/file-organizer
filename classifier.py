@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, Callable
 
 import anthropic
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError
@@ -219,6 +219,7 @@ def classify_files(
     files: list[dict[str, Any]],
     batch_size: int,
     workers: int = 1,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for _, _, _, batch_results, _ in classify_files_iter(
@@ -226,6 +227,7 @@ def classify_files(
         files,
         batch_size=batch_size,
         workers=workers,
+        is_cancelled=is_cancelled,
     ):
         results.extend(batch_results)
     return results
@@ -236,6 +238,7 @@ def classify_files_iter(
     files: list[dict[str, Any]],
     batch_size: int,
     workers: int = 1,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> Iterator[tuple[int, int, list[dict[str, Any]], list[dict[str, Any]], str | None]]:
     """Yield (completed_count, total_count, batch, batch_results, error_message) after each batch."""
     def process_batch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
@@ -257,6 +260,8 @@ def classify_files_iter(
     worker_count = min(max(1, workers), len(batches))
     if worker_count <= 1:
         for batch in batches:
+            if is_cancelled and is_cancelled():
+                raise RuntimeError("任务已取消。")
             batch_results, error_message = process_batch(batch)
             done += len(batch)
             yield done, total, batch, batch_results, error_message
@@ -267,11 +272,17 @@ def classify_files_iter(
             executor.submit(process_batch, batch): batch
             for batch in batches
         }
-        for future in as_completed(future_map):
-            batch = future_map[future]
-            batch_results, error_message = future.result()
-            done += len(batch)
-            yield done, total, batch, batch_results, error_message
+        try:
+            for future in as_completed(future_map):
+                if is_cancelled and is_cancelled():
+                    raise RuntimeError("任务已取消。")
+                batch = future_map[future]
+                batch_results, error_message = future.result()
+                done += len(batch)
+                yield done, total, batch, batch_results, error_message
+        except RuntimeError:
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
 
 
 def build_summary_prompt(file_path: str, extracted_text: str) -> str:
