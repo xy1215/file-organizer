@@ -13,6 +13,8 @@ import anthropic
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError
 from openai import BadRequestError, NotFoundError, OpenAI, RateLimitError
 
+from common import ensure_dict
+
 
 DEFAULT_CATEGORIES = [
     "工作/报告与方案",
@@ -45,13 +47,9 @@ DEFAULT_CATEGORIES = [
 ]
 
 
-def _ensure_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
 class LLMClient:
     def __init__(self, config: dict[str, Any]) -> None:
-        llm_config = _ensure_dict(config.get("llm", {}))
+        llm_config = ensure_dict(config.get("llm", {}))
         self.provider = (llm_config.get("provider") or "openai").lower()
         self.api_key = self._resolve_api_key(llm_config)
         self.model = llm_config.get("model") or "gpt-4o-mini"
@@ -212,27 +210,6 @@ def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
 文件列表：
 {files_json}
 """.strip()
-
-
-def classify_files(
-    client: LLMClient,
-    files: list[dict[str, Any]],
-    batch_size: int,
-    workers: int = 1,
-    is_cancelled: Callable[[], bool] | None = None,
-) -> list[dict[str, Any]]:
-    results: list[dict[str, Any]] = []
-    for _, _, _, batch_results, _ in classify_files_iter(
-        client,
-        files,
-        batch_size=batch_size,
-        workers=workers,
-        is_cancelled=is_cancelled,
-    ):
-        results.extend(batch_results)
-    return results
-
-
 def classify_files_iter(
     client: LLMClient,
     files: list[dict[str, Any]],

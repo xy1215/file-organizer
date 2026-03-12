@@ -14,6 +14,7 @@ from rich.console import Console
 
 from cache import CacheDB
 from classifier import LLMClient, build_file_stub, classify_files_iter, summarize_text
+from common import ensure_dict, ensure_str_list
 from report import generate_reports
 from scanner import scan_files
 from summarizer import UnsupportedSummaryError, extract_text
@@ -65,16 +66,6 @@ def _progress(
 def _raise_if_cancelled(hooks: RuntimeHooks | None = None) -> None:
     if hooks and hooks.is_cancelled and hooks.is_cancelled():
         raise OperationCancelled()
-
-
-def _ensure_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _ensure_str_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
@@ -193,10 +184,10 @@ def _scan_and_classify(
     _raise_if_cancelled(hooks)
     _log("[cyan]正在扫描目录，请稍候...[/cyan]", hooks)
     _progress("scan", 0, 0, "正在扫描目录...", hooks)
-    scan_config = _ensure_dict(config.get("scan", {}))
+    scan_config = ensure_dict(config.get("scan", {}))
     scanned_files = scan_files(
-        paths=_ensure_str_list(scan_config.get("paths", [])),
-        exclude_patterns=_ensure_str_list(scan_config.get("exclude_patterns", [])),
+        paths=ensure_str_list(scan_config.get("paths", [])),
+        exclude_patterns=ensure_str_list(scan_config.get("exclude_patterns", [])),
     )
     if not scanned_files:
         _log("[yellow]没有扫描到符合条件的文件。[/yellow]", hooks)

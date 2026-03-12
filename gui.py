@@ -33,22 +33,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from common import ensure_dict, ensure_str_list
 from main import OperationCancelled, RuntimeHooks, run_report, run_scan, run_stats, run_summarize
 from main import run_sync
 
 
 CONFIG_PATH = Path("config.yaml")
 REPORT_PATH = Path("report.html")
-
-
-def _ensure_dict(value: Any) -> dict[str, Any]:
-    return value if isinstance(value, dict) else {}
-
-
-def _ensure_str_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def default_config() -> dict[str, Any]:
@@ -88,9 +79,9 @@ def load_config() -> dict[str, Any]:
     if not isinstance(loaded, dict):
         return config
 
-    llm = _ensure_dict(loaded.get("llm", {}))
-    scan = _ensure_dict(loaded.get("scan", {}))
-    automation = _ensure_dict(loaded.get("automation", {}))
+    llm = ensure_dict(loaded.get("llm", {}))
+    scan = ensure_dict(loaded.get("scan", {}))
+    automation = ensure_dict(loaded.get("automation", {}))
 
     config["llm"].update(
         {
@@ -104,8 +95,8 @@ def load_config() -> dict[str, Any]:
     )
     config["scan"].update(
         {
-            "paths": _ensure_str_list(scan.get("paths", [])),
-            "exclude_patterns": _ensure_str_list(scan.get("exclude_patterns", [])),
+            "paths": ensure_str_list(scan.get("paths", [])),
+            "exclude_patterns": ensure_str_list(scan.get("exclude_patterns", [])),
         }
     )
     config["batch_size"] = normalize_batch_size(loaded.get("batch_size", config["batch_size"]))
@@ -416,9 +407,9 @@ class MainWindow(QMainWindow):
         return box
 
     def _load_into_form(self, config: dict[str, Any]) -> None:
-        llm = _ensure_dict(config.get("llm", {}))
-        scan = _ensure_dict(config.get("scan", {}))
-        automation = _ensure_dict(config.get("automation", {}))
+        llm = ensure_dict(config.get("llm", {}))
+        scan = ensure_dict(config.get("scan", {}))
+        automation = ensure_dict(config.get("automation", {}))
         self.provider_input.setText(str(llm.get("provider", "openai")))
         self.api_key_input.setText(str(llm.get("api_key", "")))
         self.model_input.setText(str(llm.get("model", "gpt-4o-mini")))
@@ -435,9 +426,9 @@ class MainWindow(QMainWindow):
         )
 
         self.path_list.clear()
-        for path in _ensure_str_list(scan.get("paths", [])):
+        for path in ensure_str_list(scan.get("paths", [])):
             self.path_list.addItem(QListWidgetItem(str(path)))
-        self.exclude_input.setPlainText("\n".join(_ensure_str_list(scan.get("exclude_patterns", []))))
+        self.exclude_input.setPlainText("\n".join(ensure_str_list(scan.get("exclude_patterns", []))))
         self._sync_auto_scan_timer()
 
     def _build_config_from_form(self) -> dict[str, Any]:
