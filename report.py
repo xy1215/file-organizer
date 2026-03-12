@@ -775,6 +775,14 @@ def _format_modified_time(value: object) -> str:
         return "未知时间"
 
 
+def _safe_file_size(value: object) -> int:
+    try:
+        size = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(size, 0)
+
+
 def prepare_records(records: list[dict]) -> list[dict]:
     prepared: list[dict] = []
     for record in records:
@@ -787,7 +795,7 @@ def prepare_records(records: list[dict]) -> list[dict]:
             {
                 **record,
                 "file_name": path.name,
-                "file_size_human": human_size(int(record.get("file_size") or 0)),
+                "file_size_human": human_size(_safe_file_size(record.get("file_size"))),
                 "modified_at": _format_modified_time(record.get("modified_time")),
                 "file_uri": file_uri(file_path),
                 "ext_class": ext_class,

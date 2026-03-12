@@ -36,14 +36,38 @@ def get_default_paths() -> list[Path]:
 
 
 def normalize_scan_paths(extra_paths: list[str] | None = None) -> list[Path]:
-    paths: list[Path] = []
-    for path in get_default_paths():
-        paths.append(path.expanduser())
-    for path in extra_paths or []:
-        expanded = Path(path).expanduser()
-        if expanded not in paths:
-            paths.append(expanded)
-    return paths
+    normalized: list[Path] = []
+    seen: set[str] = set()
+    for path in [*get_default_paths(), *(Path(item) for item in (extra_paths or []))]:
+        expanded = path.expanduser()
+        try:
+            resolved = expanded.resolve(strict=False)
+        except OSError:
+            resolved = expanded
+        key = str(resolved).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(resolved)
+    return normalized
+
+
+def _is_relative_to(path: Path, base: Path) -> bool:
+    try:
+        path.relative_to(base)
+        return True
+    except ValueError:
+        return False
+
+
+def compact_scan_roots(roots: list[Path]) -> list[Path]:
+    """Drop nested scan roots to avoid duplicate traversal for overlapping paths."""
+    compacted: list[Path] = []
+    for root in sorted(roots, key=lambda item: (len(str(item)), str(item).lower())):
+        if any(_is_relative_to(root, existing) for existing in compacted):
+            continue
+        compacted.append(root)
+    return compacted
 
 
 def should_exclude_dir(dir_name: str, exclude_patterns: set[str]) -> bool:
@@ -67,7 +91,8 @@ def is_valid_file(path: Path) -> bool:
 def scan_files(paths: list[str] | None = None, exclude_patterns: list[str] | None = None) -> list[ScannedFile]:
     exclude_set = set(exclude_patterns or [])
     scanned: list[ScannedFile] = []
-    for root in normalize_scan_paths(paths):
+    seen_files: set[str] = set()
+    for root in compact_scan_roots(normalize_scan_paths(paths)):
         if not root.exists():
             continue
         for current_root, dirnames, filenames in os.walk(root):
@@ -81,9 +106,18 @@ def scan_files(paths: list[str] | None = None, exclude_patterns: list[str] | Non
                 except OSError:
                     logging.exception("读取文件信息失败: %s", file_path)
                     continue
+                try:
+                    resolved_file = file_path.resolve()
+                except OSError:
+                    logging.exception("规范化文件路径失败: %s", file_path)
+                    continue
+                resolved_key = str(resolved_file).lower()
+                if resolved_key in seen_files:
+                    continue
+                seen_files.add(resolved_key)
                 scanned.append(
                     ScannedFile(
-                        file_path=str(file_path.resolve()),
+                        file_path=str(resolved_file),
                         name=file_path.name,
                         size=stat.st_size,
                         modified_time=stat.st_mtime,
