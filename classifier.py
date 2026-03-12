@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
-import hashlib
 from pathlib import Path
 from collections.abc import Iterator
 from typing import Any
@@ -156,6 +156,7 @@ def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
 4. confidence 取值范围 0 到 1。
 5. brief 为一句话描述（不超过 20 个汉字），根据文件名和路径推测文件可能的内容或用途。
 6. 输出必须是 JSON，格式如下：
+7. file_id 必须与输入中的 file_id 完全一致，原样返回，不要改写。
 {{
   "classifications": [
     {{
@@ -254,4 +255,8 @@ def build_file_stub(path: str) -> dict[str, Any]:
 
 
 def _build_file_id(path: str) -> str:
-    return hashlib.sha1(path.encode("utf-8")).hexdigest()[:16]
+    normalized = path.strip()
+    if not normalized:
+        return ""
+    normalized = os.path.normcase(normalized)
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]

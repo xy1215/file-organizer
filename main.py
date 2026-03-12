@@ -77,6 +77,10 @@ def _normalize_file_path(value: str) -> str:
     return os.path.normcase(str(resolved))
 
 
+def _normalize_file_id(value: str) -> str:
+    return value.strip().lower()
+
+
 def get_summary_workers(config: dict[str, Any]) -> int:
     raw = config.get("summary_workers", 4)
     try:
@@ -211,7 +215,7 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
                 normalized = _normalize_file_path(batch_file_path)
                 if normalized:
                     batch_path_map.setdefault(normalized, batch_file_path)
-                file_id = str(item.get("file_id") or "").strip()
+                file_id = _normalize_file_id(str(item.get("file_id") or ""))
                 if file_id:
                     batch_id_map.setdefault(file_id, batch_file_path)
             update_rows: list[tuple[str, str, str | None]] = []
@@ -224,7 +228,7 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
                 )
 
             for item in batch_results:
-                file_id = str(item.get("file_id") or "").strip()
+                file_id = _normalize_file_id(str(item.get("file_id") or ""))
                 file_path = str(item.get("file_path") or "").strip()
                 category = str(item.get("category") or "").strip()
                 matched_path = batch_id_map.get(file_id) if file_id else None
