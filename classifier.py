@@ -42,9 +42,13 @@ DEFAULT_CATEGORIES = [
 ]
 
 
+def _ensure_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
 class LLMClient:
     def __init__(self, config: dict[str, Any]) -> None:
-        llm_config = config.get("llm", {})
+        llm_config = _ensure_dict(config.get("llm", {}))
         self.provider = (llm_config.get("provider") or "openai").lower()
         self.api_key = self._resolve_api_key(llm_config)
         self.model = llm_config.get("model") or "gpt-4o-mini"

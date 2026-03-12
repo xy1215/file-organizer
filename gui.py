@@ -42,6 +42,16 @@ CONFIG_PATH = Path("config.yaml")
 REPORT_PATH = Path("report.html")
 
 
+def _ensure_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _ensure_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 def default_config() -> dict[str, Any]:
     return {
         "llm": {
@@ -65,15 +75,49 @@ def default_config() -> dict[str, Any]:
 
 
 def load_config() -> dict[str, Any]:
+    config = default_config()
     if not CONFIG_PATH.exists():
-        return default_config()
+        return config
     with CONFIG_PATH.open("r", encoding="utf-8") as handle:
         loaded = yaml.safe_load(handle)
     if not loaded:
-        return default_config()
+        return config
     if not isinstance(loaded, dict):
-        return default_config()
-    return loaded
+        return config
+
+    llm = _ensure_dict(loaded.get("llm", {}))
+    scan = _ensure_dict(loaded.get("scan", {}))
+    automation = _ensure_dict(loaded.get("automation", {}))
+
+    config["llm"].update(
+        {
+            "provider": str(llm.get("provider") or config["llm"]["provider"]).strip() or "openai",
+            "api_key": str(llm.get("api_key") or "").strip(),
+            "model": str(llm.get("model") or config["llm"]["model"]).strip() or config["llm"]["model"],
+            "summary_model": str(llm.get("summary_model") or config["llm"]["summary_model"]).strip()
+            or config["llm"]["summary_model"],
+            "base_url": str(llm.get("base_url") or "").strip(),
+        }
+    )
+    config["scan"].update(
+        {
+            "paths": _ensure_str_list(scan.get("paths", [])),
+            "exclude_patterns": _ensure_str_list(scan.get("exclude_patterns", [])),
+        }
+    )
+    config["batch_size"] = normalize_batch_size(loaded.get("batch_size", config["batch_size"]))
+    config["summary_workers"] = normalize_summary_workers(
+        loaded.get("summary_workers", config["summary_workers"])
+    )
+    config["automation"].update(
+        {
+            "auto_scan_enabled": bool(automation.get("auto_scan_enabled", config["automation"]["auto_scan_enabled"])),
+            "interval_minutes": normalize_auto_scan_interval(
+                automation.get("interval_minutes", config["automation"]["interval_minutes"])
+            ),
+        }
+    )
+    return config
 
 
 def save_config(config: dict[str, Any]) -> None:
@@ -350,9 +394,9 @@ class MainWindow(QMainWindow):
         return box
 
     def _load_into_form(self, config: dict[str, Any]) -> None:
-        llm = config.get("llm", {})
-        scan = config.get("scan", {})
-        automation = config.get("automation", {})
+        llm = _ensure_dict(config.get("llm", {}))
+        scan = _ensure_dict(config.get("scan", {}))
+        automation = _ensure_dict(config.get("automation", {}))
         self.provider_input.setText(str(llm.get("provider", "openai")))
         self.api_key_input.setText(str(llm.get("api_key", "")))
         self.model_input.setText(str(llm.get("model", "gpt-4o-mini")))
@@ -366,9 +410,9 @@ class MainWindow(QMainWindow):
         )
 
         self.path_list.clear()
-        for path in scan.get("paths", []):
+        for path in _ensure_str_list(scan.get("paths", [])):
             self.path_list.addItem(QListWidgetItem(str(path)))
-        self.exclude_input.setPlainText("\n".join(scan.get("exclude_patterns", [])))
+        self.exclude_input.setPlainText("\n".join(_ensure_str_list(scan.get("exclude_patterns", []))))
         self._sync_auto_scan_timer()
 
     def _build_config_from_form(self) -> dict[str, Any]:

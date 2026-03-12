@@ -26,6 +26,16 @@ logging.basicConfig(
 )
 
 
+def _ensure_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _ensure_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
 def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
     path = Path(config_path)
     if not path.exists():
@@ -122,9 +132,10 @@ def _select_summary_targets(
 
 def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = False) -> dict[str, Any]:
     console.print("[cyan]正在扫描目录，请稍候...[/cyan]")
+    scan_config = _ensure_dict(config.get("scan", {}))
     scanned_files = scan_files(
-        paths=config.get("scan", {}).get("paths", []),
-        exclude_patterns=config.get("scan", {}).get("exclude_patterns", []),
+        paths=_ensure_str_list(scan_config.get("paths", [])),
+        exclude_patterns=_ensure_str_list(scan_config.get("exclude_patterns", [])),
     )
     if not scanned_files:
         console.print("[yellow]没有扫描到符合条件的文件。[/yellow]")
