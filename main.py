@@ -143,7 +143,7 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
         }
 
     console.print(f"[cyan]扫描完成，发现 {len(scanned_files)} 个符合条件的文件，正在检查缓存...[/cyan]")
-    existing_records = cache.index_by_path()
+    existing_records = cache.index_scan_state_by_path()
     scanned_paths = {item.file_path for item in scanned_files}
     removed = cache.delete_absent_files(scanned_paths)
     if removed:
@@ -161,14 +161,14 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
             and record is not None
             and record.file_size == item.size
             and record.modified_time == item.modified_time
-            and bool((record.category or "").strip())
+            and record.has_category
         )
         if unchanged:
             unchanged_paths.add(item.file_path)
         else:
             changed_paths.append(item.file_path)
             changed_path_set.add(item.file_path)
-        if force or record is None or not str(record.summary or "").strip() or item.file_path in changed_path_set:
+        if force or record is None or not record.has_summary or item.file_path in changed_path_set:
             summary_candidates.add(item.file_path)
         upsert_rows.append((item.file_path, item.size, item.modified_time))
 
@@ -280,6 +280,8 @@ def _run_summary_jobs(cache: CacheDB, config: dict[str, Any], targets: list[str]
     )
     success = 0
     completed = 0
+    pending_updates: list[tuple[str, str]] = []
+    flush_size = 20
     client_local = threading.local()
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_map = {
@@ -289,14 +291,23 @@ def _run_summary_jobs(cache: CacheDB, config: dict[str, Any], targets: list[str]
         for future in as_completed(future_map):
             target = future_map[future]
             completed += 1
-            ok, message = future.result()
+            try:
+                ok, message = future.result()
+            except Exception as exc:
+                logging.exception("摘要任务线程异常: %s", target)
+                ok, message = False, f"摘要失败：{exc}"
             console.print(f"[cyan]进度：{completed}/{len(targets)} - 已完成 {Path(target).name}[/cyan]")
             if ok:
                 success += 1
-                cache.update_summary(target, message)
+                pending_updates.append((target, message))
+                if len(pending_updates) >= flush_size:
+                    cache.update_summaries_bulk(pending_updates)
+                    pending_updates.clear()
             else:
                 logging.error("摘要失败: %s | %s", target, message)
             console.print(message)
+    if pending_updates:
+        cache.update_summaries_bulk(pending_updates)
     return success, len(targets)
 
 

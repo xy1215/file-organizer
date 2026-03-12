@@ -19,6 +19,14 @@ class CacheRecord:
     processed_at: str | None = None
 
 
+@dataclass
+class ScanState:
+    file_size: int
+    modified_time: float
+    has_category: bool
+    has_summary: bool
+
+
 class CacheDB:
     def __init__(self, db_path: str | Path = "cache.db") -> None:
         self.db_path = Path(db_path)
@@ -185,6 +193,21 @@ class CacheDB:
         )
         self.conn.commit()
 
+    def update_summaries_bulk(self, rows: list[tuple[str, str]]) -> int:
+        if not rows:
+            return 0
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.conn:
+            self.conn.executemany(
+                """
+                UPDATE file_cache
+                SET summary = ?, processed_at = ?
+                WHERE file_path = ?
+                """,
+                [(summary, now, file_path) for file_path, summary in rows],
+            )
+        return len(rows)
+
     def clear_summaries_bulk(self, file_paths: list[str]) -> int:
         if not file_paths:
             return 0
@@ -272,6 +295,28 @@ class CacheDB:
         rows = self.conn.execute("SELECT * FROM file_cache").fetchall()
         return {
             row["file_path"]: CacheRecord(**dict(row))
+            for row in rows
+        }
+
+    def index_scan_state_by_path(self) -> dict[str, ScanState]:
+        rows = self.conn.execute(
+            """
+            SELECT
+                file_path,
+                file_size,
+                modified_time,
+                CASE WHEN category IS NOT NULL AND TRIM(category) != '' THEN 1 ELSE 0 END AS has_category,
+                CASE WHEN summary IS NOT NULL AND TRIM(summary) != '' THEN 1 ELSE 0 END AS has_summary
+            FROM file_cache
+            """
+        ).fetchall()
+        return {
+            row["file_path"]: ScanState(
+                file_size=row["file_size"],
+                modified_time=row["modified_time"],
+                has_category=bool(row["has_category"]),
+                has_summary=bool(row["has_summary"]),
+            )
             for row in rows
         }
 
