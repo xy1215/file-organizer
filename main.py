@@ -141,6 +141,7 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
     unchanged_paths: set[str] = set()
     upsert_rows: list[tuple[str, int, float]] = []
     changed_paths: list[str] = []
+    changed_path_set: set[str] = set()
     summary_candidates: set[str] = set()
     for item in scanned_files:
         record = existing_records.get(item.file_path)
@@ -155,7 +156,8 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
             unchanged_paths.add(item.file_path)
         else:
             changed_paths.append(item.file_path)
-        if force or record is None or not str(record.summary or "").strip() or item.file_path in changed_paths:
+            changed_path_set.add(item.file_path)
+        if force or record is None or not str(record.summary or "").strip() or item.file_path in changed_path_set:
             summary_candidates.add(item.file_path)
         upsert_rows.append((item.file_path, item.size, item.modified_time))
 
@@ -172,6 +174,7 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
             if item.file_path not in unchanged_paths
         ]
 
+    classified = 0
     if not pending:
         console.print(f"[green]扫描完成，共 {len(scanned_files)} 个文件，未发现需要重新分类的文件。[/green]")
     else:
@@ -183,7 +186,6 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
         batch_size = get_batch_size(config)
         console.print(f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
 
-        classified = 0
         for done, total, batch, batch_results in classify_files_iter(client, pending, batch_size=batch_size):
             batch_path_map: dict[str, str] = {}
             for item in batch:
@@ -212,7 +214,7 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
             if missing:
                 console.print(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]")
             console.print(f"进度：{done}/{total} - 已分类 {classified} 个文件")
-    classified = len([path for path in scanned_files if path.file_path not in unchanged_paths])
+
     summary_targets = _select_summary_targets(cache, candidate_paths=list(summary_candidates))
     return {
         "scanned_files": scanned_files,
