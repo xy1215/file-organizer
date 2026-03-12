@@ -66,6 +66,7 @@ def default_config() -> dict[str, Any]:
             "exclude_patterns": ["node_modules", ".git", "__pycache__", "AppData"],
         },
         "batch_size": 80,
+        "classification_workers": 2,
         "summary_workers": 4,
         "automation": {
             "auto_scan_enabled": False,
@@ -78,8 +79,11 @@ def load_config() -> dict[str, Any]:
     config = default_config()
     if not CONFIG_PATH.exists():
         return config
-    with CONFIG_PATH.open("r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle)
+    try:
+        with CONFIG_PATH.open("r", encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle)
+    except yaml.YAMLError:
+        return config
     if not loaded:
         return config
     if not isinstance(loaded, dict):
@@ -106,6 +110,9 @@ def load_config() -> dict[str, Any]:
         }
     )
     config["batch_size"] = normalize_batch_size(loaded.get("batch_size", config["batch_size"]))
+    config["classification_workers"] = normalize_classification_workers(
+        loaded.get("classification_workers", config["classification_workers"])
+    )
     config["summary_workers"] = normalize_summary_workers(
         loaded.get("summary_workers", config["summary_workers"])
     )
@@ -139,6 +146,14 @@ def normalize_summary_workers(raw_value: Any) -> int:
     except (TypeError, ValueError):
         return 4
     return min(8, max(1, value))
+
+
+def normalize_classification_workers(raw_value: Any) -> int:
+    try:
+        value = int(raw_value or 2)
+    except (TypeError, ValueError):
+        return 2
+    return min(4, max(1, value))
 
 
 def normalize_auto_scan_interval(raw_value: Any) -> int:
@@ -262,12 +277,16 @@ class MainWindow(QMainWindow):
         self.base_url_input = QLineEdit()
         self.batch_size_input = QSpinBox()
         self.batch_size_input.setRange(80, 100)
+        self.classification_workers_input = QSpinBox()
+        self.classification_workers_input.setRange(1, 4)
         self.summary_workers_input = QSpinBox()
         self.summary_workers_input.setRange(1, 8)
         self.auto_scan_checkbox = QCheckBox("开启每小时自动巡检")
+        self.auto_scan_checkbox.toggled.connect(lambda _: self._sync_auto_scan_timer())
         self.auto_scan_interval_input = QSpinBox()
         self.auto_scan_interval_input.setRange(15, 1440)
         self.auto_scan_interval_input.setSuffix(" 分钟")
+        self.auto_scan_interval_input.valueChanged.connect(lambda _: self._sync_auto_scan_timer())
 
         form.addRow("服务商", self.provider_input)
         form.addRow("API Key", self.api_key_input)
@@ -275,6 +294,7 @@ class MainWindow(QMainWindow):
         form.addRow("摘要模型", self.summary_model_input)
         form.addRow("Base URL", self.base_url_input)
         form.addRow("批次大小", self.batch_size_input)
+        form.addRow("分类并发", self.classification_workers_input)
         form.addRow("摘要并发", self.summary_workers_input)
         form.addRow("自动巡检", self.auto_scan_checkbox)
         form.addRow("巡检间隔", self.auto_scan_interval_input)
@@ -403,6 +423,9 @@ class MainWindow(QMainWindow):
         self.summary_model_input.setText(str(llm.get("summary_model", "gpt-4o-mini")))
         self.base_url_input.setText(str(llm.get("base_url", "")))
         self.batch_size_input.setValue(normalize_batch_size(config.get("batch_size", 80)))
+        self.classification_workers_input.setValue(
+            normalize_classification_workers(config.get("classification_workers", 2))
+        )
         self.summary_workers_input.setValue(normalize_summary_workers(config.get("summary_workers", 4)))
         self.auto_scan_checkbox.setChecked(bool(automation.get("auto_scan_enabled", False)))
         self.auto_scan_interval_input.setValue(
@@ -433,6 +456,7 @@ class MainWindow(QMainWindow):
                 ],
             },
             "batch_size": self.batch_size_input.value(),
+            "classification_workers": self.classification_workers_input.value(),
             "summary_workers": self.summary_workers_input.value(),
             "automation": {
                 "auto_scan_enabled": self.auto_scan_checkbox.isChecked(),

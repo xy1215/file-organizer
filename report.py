@@ -585,14 +585,21 @@ HTML_TEMPLATE = Template(
     const backButton = document.getElementById('backButton');
     const searchBox = document.getElementById('searchBox');
     const emptyState = document.getElementById('emptyState');
+    const clusterCards = Array.from(document.querySelectorAll('.cluster-card'));
     const detailPageSize = 120;
+    const ESCAPE_MAP = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    };
     let currentDetailCategory = null;
     let detailRenderedCount = 0;
+    let filterFrame = null;
 
     function escapeHtml(value) {
-      const div = document.createElement('div');
-      div.textContent = value || '';
-      return div.innerHTML;
+      return String(value || '').replace(/[&<>"']/g, (ch) => ESCAPE_MAP[ch]);
     }
 
     function buildDetailItem(file) {
@@ -673,17 +680,27 @@ HTML_TEMPLATE = Template(
     }
 
     function updateEmptyState() {
-      const visibleCards = [...document.querySelectorAll('.cluster-card')].filter((card) => card.style.display !== 'none');
+      const visibleCards = clusterCards.filter((card) => card.style.display !== 'none');
       emptyState.classList.toggle('active', visibleCards.length === 0);
     }
 
-    function filterClusters() {
-      const keyword = searchBox.value.trim().toLowerCase();
-      document.querySelectorAll('.cluster-card').forEach((card) => {
+    function applyClusterFilter(keyword) {
+      clusterCards.forEach((card) => {
         const haystack = card.dataset.search || '';
         card.style.display = !keyword || haystack.includes(keyword) ? '' : 'none';
       });
       updateEmptyState();
+    }
+
+    function filterClusters() {
+      const keyword = searchBox.value.trim().toLowerCase();
+      if (filterFrame !== null) {
+        cancelAnimationFrame(filterFrame);
+      }
+      filterFrame = requestAnimationFrame(() => {
+        applyClusterFilter(keyword);
+        filterFrame = null;
+      });
     }
 
     document.addEventListener('click', (event) => {
@@ -972,6 +989,6 @@ def generate_reports(records: list[dict], html_path: str = "report.html", json_p
         categorized_files=sum(1 for record in prepared if _clean_category_name(record.get("category")) != "未分类"),
         summarized_files=sum(1 for record in prepared if str(record.get("summary") or "").strip()),
         categories=categories,
-        report_data_json=json.dumps(report_data, ensure_ascii=False),
+        report_data_json=json.dumps(report_data, ensure_ascii=False, separators=(",", ":")),
     )
     Path(html_path).write_text(html, encoding="utf-8")
