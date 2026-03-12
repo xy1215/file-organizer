@@ -42,6 +42,7 @@ class CacheDB:
         )
         self.conn.commit()
         self._migrate_add_brief()
+        self._migrate_add_indexes()
 
     def _migrate_add_brief(self) -> None:
         columns = [
@@ -51,6 +52,21 @@ class CacheDB:
         if "brief" not in columns:
             self.conn.execute("ALTER TABLE file_cache ADD COLUMN brief TEXT")
             self.conn.commit()
+
+    def _migrate_add_indexes(self) -> None:
+        self.conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_file_cache_category_path
+            ON file_cache(category, file_path)
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_file_cache_summary_path
+            ON file_cache(summary, file_path)
+            """
+        )
+        self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
@@ -228,7 +244,7 @@ class CacheDB:
         if not file_paths:
             return []
 
-        matched: list[str] = []
+        matched: set[str] = set()
         with self.conn:
             for chunk in self._chunked(file_paths, 500):
                 placeholders = ",".join("?" for _ in chunk)
@@ -239,12 +255,18 @@ class CacheDB:
                     WHERE file_path IN ({placeholders})
                     AND category IS NOT NULL
                     AND TRIM(category) != ''
-                    ORDER BY file_path
                     """,
                     tuple(chunk),
                 ).fetchall()
-                matched.extend(row["file_path"] for row in rows)
-        return matched
+                matched.update(row["file_path"] for row in rows)
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for file_path in file_paths:
+            if file_path in matched and file_path not in seen:
+                ordered.append(file_path)
+                seen.add(file_path)
+        return ordered
 
     def index_by_path(self) -> dict[str, CacheRecord]:
         rows = self.conn.execute("SELECT * FROM file_cache").fetchall()

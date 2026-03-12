@@ -71,7 +71,7 @@ def compact_scan_roots(roots: list[Path]) -> list[Path]:
 
 
 def should_exclude_dir(dir_name: str, exclude_patterns: set[str]) -> bool:
-    return dir_name.startswith(".") or dir_name in exclude_patterns
+    return dir_name.startswith(".") or dir_name.lower() in exclude_patterns
 
 
 def is_valid_file(path: Path) -> bool:
@@ -89,7 +89,11 @@ def is_valid_file(path: Path) -> bool:
 
 
 def scan_files(paths: list[str] | None = None, exclude_patterns: list[str] | None = None) -> list[ScannedFile]:
-    exclude_set = set(exclude_patterns or [])
+    exclude_set = {
+        str(pattern).strip().lower()
+        for pattern in (exclude_patterns or [])
+        if str(pattern).strip()
+    }
     scanned: list[ScannedFile] = []
     seen_files: set[str] = set()
     for root in compact_scan_roots(normalize_scan_paths(paths)):
