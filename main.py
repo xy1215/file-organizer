@@ -31,7 +31,11 @@ def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
     if not path.exists():
         raise click.ClickException("未找到 config.yaml，请先检查项目目录。")
     with path.open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or {}
+        loaded = yaml.safe_load(handle) or {}
+    if not isinstance(loaded, dict):
+        console.print("[yellow]config.yaml 顶层结构无效，已按空配置处理。[/yellow]")
+        return {}
+    return loaded
 
 
 def get_cache() -> CacheDB:

@@ -68,7 +68,12 @@ def load_config() -> dict[str, Any]:
     if not CONFIG_PATH.exists():
         return default_config()
     with CONFIG_PATH.open("r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or default_config()
+        loaded = yaml.safe_load(handle)
+    if not loaded:
+        return default_config()
+    if not isinstance(loaded, dict):
+        return default_config()
+    return loaded
 
 
 def save_config(config: dict[str, Any]) -> None:
@@ -82,6 +87,22 @@ def normalize_batch_size(raw_value: Any) -> int:
     except (TypeError, ValueError):
         return 80
     return min(100, max(80, value))
+
+
+def normalize_summary_workers(raw_value: Any) -> int:
+    try:
+        value = int(raw_value or 4)
+    except (TypeError, ValueError):
+        return 4
+    return min(8, max(1, value))
+
+
+def normalize_auto_scan_interval(raw_value: Any) -> int:
+    try:
+        value = int(raw_value or 60)
+    except (TypeError, ValueError):
+        return 60
+    return min(1440, max(15, value))
 
 
 class SignalStream(StringIO):
@@ -338,9 +359,11 @@ class MainWindow(QMainWindow):
         self.summary_model_input.setText(str(llm.get("summary_model", "gpt-4o-mini")))
         self.base_url_input.setText(str(llm.get("base_url", "")))
         self.batch_size_input.setValue(normalize_batch_size(config.get("batch_size", 80)))
-        self.summary_workers_input.setValue(max(1, min(8, int(config.get("summary_workers", 4) or 4))))
+        self.summary_workers_input.setValue(normalize_summary_workers(config.get("summary_workers", 4)))
         self.auto_scan_checkbox.setChecked(bool(automation.get("auto_scan_enabled", False)))
-        self.auto_scan_interval_input.setValue(max(15, min(1440, int(automation.get("interval_minutes", 60) or 60))))
+        self.auto_scan_interval_input.setValue(
+            normalize_auto_scan_interval(automation.get("interval_minutes", 60))
+        )
 
         self.path_list.clear()
         for path in scan.get("paths", []):
