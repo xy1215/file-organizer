@@ -231,24 +231,36 @@ class CacheDB:
             yield items[index : index + size]
 
     def delete_absent_files(self, existing_paths: set[str]) -> int:
-        cached_rows = self.conn.execute("SELECT file_path FROM file_cache").fetchall()
-        if not cached_rows:
-            return 0
+        if not existing_paths:
+            with self.conn:
+                cursor = self.conn.execute("DELETE FROM file_cache")
+            return max(cursor.rowcount, 0)
 
-        stale_paths = [row["file_path"] for row in cached_rows if row["file_path"] not in existing_paths]
-        if not stale_paths:
-            return 0
-
-        deleted = 0
         with self.conn:
-            for chunk in self._chunked(stale_paths, 500):
-                placeholders = ",".join("?" for _ in chunk)
-                cursor = self.conn.execute(
-                    f"DELETE FROM file_cache WHERE file_path IN ({placeholders})",
-                    tuple(chunk),
+            self.conn.execute(
+                """
+                CREATE TEMP TABLE IF NOT EXISTS temp_scan_paths (
+                    file_path TEXT PRIMARY KEY
                 )
-                deleted += max(cursor.rowcount, 0)
-        return deleted
+                """
+            )
+            self.conn.execute("DELETE FROM temp_scan_paths")
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO temp_scan_paths(file_path) VALUES (?)",
+                ((file_path,) for file_path in existing_paths),
+            )
+            cursor = self.conn.execute(
+                """
+                DELETE FROM file_cache
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM temp_scan_paths
+                    WHERE temp_scan_paths.file_path = file_cache.file_path
+                )
+                """
+            )
+            self.conn.execute("DELETE FROM temp_scan_paths")
+        return max(cursor.rowcount, 0)
 
     def list_all(self) -> list[dict[str, Any]]:
         rows = self.conn.execute(

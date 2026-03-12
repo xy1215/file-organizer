@@ -153,7 +153,8 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
     upsert_rows: list[tuple[str, int, float]] = []
     changed_paths: list[str] = []
     changed_path_set: set[str] = set()
-    summary_candidates: set[str] = set()
+    summary_candidates: list[str] = []
+    summary_candidate_seen: set[str] = set()
     for item in scanned_files:
         record = existing_records.get(item.file_path)
         unchanged = (
@@ -169,7 +170,9 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
             changed_paths.append(item.file_path)
             changed_path_set.add(item.file_path)
         if force or record is None or not record.has_summary or item.file_path in changed_path_set:
-            summary_candidates.add(item.file_path)
+            if item.file_path not in summary_candidate_seen:
+                summary_candidate_seen.add(item.file_path)
+                summary_candidates.append(item.file_path)
         upsert_rows.append((item.file_path, item.size, item.modified_time))
 
     cache.upsert_files_bulk(upsert_rows)
@@ -202,11 +205,15 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
             client, pending, batch_size=batch_size
         ):
             batch_path_map: dict[str, str] = {}
+            batch_id_map: dict[str, str] = {}
             for item in batch:
                 batch_file_path = str(item.get("file_path") or "").strip()
                 normalized = _normalize_file_path(batch_file_path)
                 if normalized:
                     batch_path_map.setdefault(normalized, batch_file_path)
+                file_id = str(item.get("file_id") or "").strip()
+                if file_id:
+                    batch_id_map.setdefault(file_id, batch_file_path)
             update_rows: list[tuple[str, str, str | None]] = []
             covered_paths: set[str] = set()
 
@@ -217,11 +224,14 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
                 )
 
             for item in batch_results:
+                file_id = str(item.get("file_id") or "").strip()
                 file_path = str(item.get("file_path") or "").strip()
                 category = str(item.get("category") or "").strip()
-                normalized = _normalize_file_path(file_path)
-                matched_path = batch_path_map.get(normalized)
-                if not normalized or not category or not matched_path:
+                matched_path = batch_id_map.get(file_id) if file_id else None
+                if not matched_path:
+                    normalized = _normalize_file_path(file_path)
+                    matched_path = batch_path_map.get(normalized)
+                if not category or not matched_path:
                     continue
                 brief = str(item.get("brief") or "").strip() or None
                 if matched_path in covered_paths:
@@ -239,7 +249,7 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
                 f"[yellow]分类阶段有 {failed_batches} 个批次失败，其他批次已继续处理。可稍后执行 sync/scan 重试。[/yellow]"
             )
 
-    summary_targets = _select_summary_targets(cache, candidate_paths=list(summary_candidates))
+    summary_targets = _select_summary_targets(cache, candidate_paths=summary_candidates)
     return {
         "scanned_files": scanned_files,
         "changed_paths": changed_paths,

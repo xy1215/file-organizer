@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import hashlib
 from pathlib import Path
 from collections.abc import Iterator
 from typing import Any
@@ -158,6 +159,7 @@ def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
 {{
   "classifications": [
     {{
+      "file_id": "文件唯一标识",
       "file_path": "完整路径",
       "category": "大类/子类",
       "confidence": 0.9,
@@ -244,7 +246,12 @@ def summarize_text(client: LLMClient, file_path: str, extracted_text: str) -> st
 def build_file_stub(path: str) -> dict[str, Any]:
     file_path = Path(path)
     return {
+        "file_id": _build_file_id(str(file_path)),
         "file_path": str(file_path),
         "file_name": file_path.name,
         "parent_path": str(file_path.parent),
     }
+
+
+def _build_file_id(path: str) -> str:
+    return hashlib.sha1(path.encode("utf-8")).hexdigest()[:16]
