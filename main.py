@@ -186,7 +186,10 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
         batch_size = get_batch_size(config)
         console.print(f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
 
-        for done, total, batch, batch_results in classify_files_iter(client, pending, batch_size=batch_size):
+        failed_batches = 0
+        for done, total, batch, batch_results, batch_error in classify_files_iter(
+            client, pending, batch_size=batch_size
+        ):
             batch_path_map: dict[str, str] = {}
             for item in batch:
                 batch_file_path = str(item.get("file_path") or "").strip()
@@ -195,6 +198,12 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
                     batch_path_map.setdefault(normalized, batch_file_path)
             update_rows: list[tuple[str, str, str | None]] = []
             covered_paths: set[str] = set()
+
+            if batch_error:
+                failed_batches += 1
+                console.print(
+                    f"[yellow]警告：批次分类失败，已跳过该批次（{done}/{total}）：{batch_error}[/yellow]"
+                )
 
             for item in batch_results:
                 file_path = str(item.get("file_path") or "").strip()
@@ -214,6 +223,10 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
             if missing:
                 console.print(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]")
             console.print(f"进度：{done}/{total} - 已分类 {classified} 个文件")
+        if failed_batches:
+            console.print(
+                f"[yellow]分类阶段有 {failed_batches} 个批次失败，其他批次已继续处理。可稍后执行 sync/scan 重试。[/yellow]"
+            )
 
     summary_targets = _select_summary_targets(cache, candidate_paths=list(summary_candidates))
     return {

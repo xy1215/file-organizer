@@ -4,6 +4,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -186,8 +187,9 @@ class CacheDB:
         return len(file_paths)
 
     @staticmethod
-    def _chunked(items: list[str], size: int) -> list[list[str]]:
-        return [items[i : i + size] for i in range(0, len(items), size)]
+    def _chunked(items: list[str], size: int) -> Iterator[list[str]]:
+        for index in range(0, len(items), size):
+            yield items[index : index + size]
 
     def delete_absent_files(self, existing_paths: set[str]) -> int:
         cached_rows = self.conn.execute("SELECT file_path FROM file_cache").fetchall()

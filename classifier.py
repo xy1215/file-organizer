@@ -133,8 +133,9 @@ class LLMClient:
         return self._retry(_call)
 
 
-def chunk_list(items: list[Any], size: int) -> list[list[Any]]:
-    return [items[i : i + size] for i in range(0, len(items), size)]
+def chunk_list(items: list[Any], size: int) -> Iterator[list[Any]]:
+    for index in range(0, len(items), size):
+        yield items[index : index + size]
 
 
 def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
@@ -168,30 +169,30 @@ def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
 
 def classify_files(client: LLMClient, files: list[dict[str, Any]], batch_size: int) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    for batch in chunk_list(files, batch_size):
-        prompt = build_classification_prompt(batch)
-        payload = client.complete_json(prompt, model=client.model)
-        batch_results = payload.get("classifications", [])
-        if isinstance(batch_results, list):
-            results.extend(batch_results)
+    for _, _, _, batch_results, _ in classify_files_iter(client, files, batch_size=batch_size):
+        results.extend(batch_results)
     return results
 
 
 def classify_files_iter(
     client: LLMClient, files: list[dict[str, Any]], batch_size: int
-) -> Iterator[tuple[int, int, list[dict[str, Any]], list[dict[str, Any]]]]:
-    """Yield (completed_count, total_count, batch, batch_results) after each batch."""
-    batches = chunk_list(files, batch_size)
+) -> Iterator[tuple[int, int, list[dict[str, Any]], list[dict[str, Any]], str | None]]:
+    """Yield (completed_count, total_count, batch, batch_results, error_message) after each batch."""
     total = len(files)
     done = 0
-    for batch in batches:
-        prompt = build_classification_prompt(batch)
-        payload = client.complete_json(prompt, model=client.model)
-        batch_results = payload.get("classifications", [])
-        if not isinstance(batch_results, list):
-            batch_results = []
+    for batch in chunk_list(files, batch_size):
+        error_message: str | None = None
+        batch_results: list[dict[str, Any]] = []
+        try:
+            prompt = build_classification_prompt(batch)
+            payload = client.complete_json(prompt, model=client.model)
+            raw_results = payload.get("classifications", [])
+            if isinstance(raw_results, list):
+                batch_results = [item for item in raw_results if isinstance(item, dict)]
+        except Exception as exc:
+            error_message = str(exc) or exc.__class__.__name__
         done += len(batch)
-        yield done, total, batch, batch_results
+        yield done, total, batch, batch_results, error_message
 
 
 def build_summary_prompt(file_path: str, extracted_text: str) -> str:
