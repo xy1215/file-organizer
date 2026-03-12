@@ -432,6 +432,32 @@ HTML_TEMPLATE = Template(
       font-size: 12px;
       color: var(--muted);
     }
+    .detail-load-more {
+      margin-top: 16px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .detail-load-more.active {
+      display: flex;
+    }
+    .detail-load-more button {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.72);
+      color: var(--text);
+      padding: 9px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .detail-load-more button:hover {
+      filter: brightness(0.98);
+    }
     @media (max-width: 980px) {
       .hero {
         grid-template-columns: 1fr;
@@ -538,6 +564,10 @@ HTML_TEMPLATE = Template(
         <button class="back-link" id="backButton" type="button">返回所有 cluster</button>
       </div>
       <div class="detail-list" id="detailList"></div>
+      <div class="detail-load-more" id="detailLoadMore">
+        <span id="detailLoadMoreText"></span>
+        <button id="detailLoadMoreButton" type="button">加载更多</button>
+      </div>
       <div class="footnote">说明：若文件还没有正式摘要，这里显示的是基于文件名和路径推测的简短描述。</div>
     </section>
   </div>
@@ -549,9 +579,15 @@ HTML_TEMPLATE = Template(
     const detailTitle = document.getElementById('detailTitle');
     const detailSubtitle = document.getElementById('detailSubtitle');
     const detailList = document.getElementById('detailList');
+    const detailLoadMore = document.getElementById('detailLoadMore');
+    const detailLoadMoreText = document.getElementById('detailLoadMoreText');
+    const detailLoadMoreButton = document.getElementById('detailLoadMoreButton');
     const backButton = document.getElementById('backButton');
     const searchBox = document.getElementById('searchBox');
     const emptyState = document.getElementById('emptyState');
+    const detailPageSize = 120;
+    let currentDetailCategory = null;
+    let detailRenderedCount = 0;
 
     function escapeHtml(value) {
       const div = document.createElement('div');
@@ -559,37 +595,59 @@ HTML_TEMPLATE = Template(
       return div.innerHTML;
     }
 
+    function buildDetailItem(file) {
+      const hasSummary = Boolean(file.summary);
+      const source = hasSummary
+        ? '<div class="detail-source">已读取正文生成摘要</div>'
+        : '<div class="detail-source">当前仅根据文件名和路径推测</div>';
+      const brief = file.display_brief
+        ? `<div class="detail-brief">${escapeHtml(file.display_brief)}</div>`
+        : '';
+      const summary = hasSummary
+        ? `<div class="detail-summary">${escapeHtml(file.summary)}</div>`
+        : '';
+      return `
+        <article class="detail-item">
+          <div class="icon-badge ${escapeHtml(file.ext_class)}">${escapeHtml(file.ext_label)}</div>
+          <div class="detail-main">
+            <div class="detail-file">${escapeHtml(file.file_name)}</div>
+            ${source}
+            ${brief}
+            <div class="detail-meta">${escapeHtml(file.modified_at)} · <a href="${escapeHtml(file.file_uri)}">${escapeHtml(file.file_path)}</a></div>
+            ${summary}
+          </div>
+          <div class="detail-size">${escapeHtml(file.file_size_human)}</div>
+        </article>
+      `;
+    }
+
+    function appendDetailItems(reset = false) {
+      if (!currentDetailCategory) return;
+      if (reset) {
+        detailList.innerHTML = '';
+        detailRenderedCount = 0;
+      }
+      const files = currentDetailCategory.files || [];
+      const chunk = files.slice(detailRenderedCount, detailRenderedCount + detailPageSize);
+      if (chunk.length > 0) {
+        detailList.insertAdjacentHTML('beforeend', chunk.map(buildDetailItem).join(''));
+      }
+      detailRenderedCount += chunk.length;
+      const hasMore = detailRenderedCount < files.length;
+      detailLoadMore.classList.toggle('active', hasMore);
+      detailLoadMoreText.textContent = `已显示 ${detailRenderedCount}/${files.length}`;
+      detailLoadMoreButton.textContent = hasMore ? '加载更多' : '已全部显示';
+      detailLoadMoreButton.disabled = !hasMore;
+    }
+
     function renderDetail(categoryId, pushHash = true) {
       const category = reportData.categories.find((item) => item.id === categoryId);
       if (!category) return;
 
+      currentDetailCategory = category;
       detailTitle.textContent = category.name;
       detailSubtitle.textContent = `${category.count} 个文件 · ${category.top_types || '混合文件类型'}`;
-      detailList.innerHTML = category.files.map((file) => {
-        const hasSummary = Boolean(file.summary);
-        const source = hasSummary
-          ? '<div class="detail-source">已读取正文生成摘要</div>'
-          : '<div class="detail-source">当前仅根据文件名和路径推测</div>';
-        const brief = file.display_brief
-          ? `<div class="detail-brief">${escapeHtml(file.display_brief)}</div>`
-          : '';
-        const summary = hasSummary
-          ? `<div class="detail-summary">${escapeHtml(file.summary)}</div>`
-          : '';
-        return `
-          <article class="detail-item">
-            <div class="icon-badge ${escapeHtml(file.ext_class)}">${escapeHtml(file.ext_label)}</div>
-            <div class="detail-main">
-              <div class="detail-file">${escapeHtml(file.file_name)}</div>
-              ${source}
-              ${brief}
-              <div class="detail-meta">${escapeHtml(file.modified_at)} · <a href="${escapeHtml(file.file_uri)}">${escapeHtml(file.file_path)}</a></div>
-              ${summary}
-            </div>
-            <div class="detail-size">${escapeHtml(file.file_size_human)}</div>
-          </article>
-        `;
-      }).join('');
+      appendDetailItems(true);
 
       clusterGrid.style.display = 'none';
       emptyState.classList.remove('active');
@@ -604,6 +662,10 @@ HTML_TEMPLATE = Template(
     function showHome(pushHash = true) {
       detailView.classList.remove('active');
       clusterGrid.style.display = '';
+      currentDetailCategory = null;
+      detailRenderedCount = 0;
+      detailLoadMore.classList.remove('active');
+      detailLoadMoreText.textContent = '';
       updateEmptyState();
       if (pushHash) {
         history.pushState({}, '', '#');
@@ -632,6 +694,10 @@ HTML_TEMPLATE = Template(
 
     backButton.addEventListener('click', () => {
       showHome();
+    });
+
+    detailLoadMoreButton.addEventListener('click', () => {
+      appendDetailItems(false);
     });
 
     searchBox.addEventListener('input', () => {
@@ -769,6 +835,12 @@ def _format_modified_time(value: object) -> str:
         timestamp = float(value)
     except (TypeError, ValueError):
         return "未知时间"
+    if timestamp > 1e18:  # nanoseconds
+        timestamp /= 1e9
+    elif timestamp > 1e15:  # microseconds
+        timestamp /= 1e6
+    elif timestamp > 1e12:  # milliseconds
+        timestamp /= 1e3
     try:
         return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
     except (OverflowError, OSError, ValueError):
