@@ -15,8 +15,11 @@ scan:
     - "__pycache__"
     - "AppData"
 
-# 分类批次大小
-batch_size: 80
+# 分类批次大小（建议 10-30）
+batch_size: 30
 
 # 分类并发请求数（1-4）
 classification_workers: 2
+
+# 摘要并发请求数（1-8）
+summary_workers: 4

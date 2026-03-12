@@ -56,15 +56,15 @@ def get_cache() -> CacheDB:
 
 
 def get_batch_size(config: dict[str, Any]) -> int:
-    raw = config.get("batch_size", 80)
+    raw = config.get("batch_size", 30)
     try:
-        raw_value = int(raw or 80)
+        raw_value = int(raw or 30)
     except (TypeError, ValueError):
-        console.print("[yellow]batch_size 配置无效，已使用默认值 80。[/yellow]")
-        raw_value = 80
-    if raw_value < 80 or raw_value > 100:
-        console.print("[yellow]batch_size 超出建议范围，已自动调整到 80-100 之间。[/yellow]")
-    return min(100, max(80, raw_value))
+        console.print("[yellow]batch_size 配置无效，已使用默认值 30。[/yellow]")
+        raw_value = 30
+    if raw_value < 10 or raw_value > 100:
+        console.print("[yellow]batch_size 超出建议范围，已自动调整到 10-100 之间。[/yellow]")
+    return min(100, max(10, raw_value))
 
 
 def _normalize_file_path(value: str) -> str:

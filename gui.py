@@ -65,7 +65,7 @@ def default_config() -> dict[str, Any]:
             "paths": [],
             "exclude_patterns": ["node_modules", ".git", "__pycache__", "AppData"],
         },
-        "batch_size": 80,
+        "batch_size": 30,
         "classification_workers": 2,
         "summary_workers": 4,
         "automation": {
@@ -134,10 +134,10 @@ def save_config(config: dict[str, Any]) -> None:
 
 def normalize_batch_size(raw_value: Any) -> int:
     try:
-        value = int(raw_value or 80)
+        value = int(raw_value or 30)
     except (TypeError, ValueError):
-        return 80
-    return min(100, max(80, value))
+        return 30
+    return min(100, max(10, value))
 
 
 def normalize_summary_workers(raw_value: Any) -> int:
@@ -276,7 +276,7 @@ class MainWindow(QMainWindow):
         self.summary_model_input = QLineEdit()
         self.base_url_input = QLineEdit()
         self.batch_size_input = QSpinBox()
-        self.batch_size_input.setRange(80, 100)
+        self.batch_size_input.setRange(10, 100)
         self.classification_workers_input = QSpinBox()
         self.classification_workers_input.setRange(1, 4)
         self.summary_workers_input = QSpinBox()
@@ -422,7 +422,7 @@ class MainWindow(QMainWindow):
         self.model_input.setText(str(llm.get("model", "gpt-4o-mini")))
         self.summary_model_input.setText(str(llm.get("summary_model", "gpt-4o-mini")))
         self.base_url_input.setText(str(llm.get("base_url", "")))
-        self.batch_size_input.setValue(normalize_batch_size(config.get("batch_size", 80)))
+        self.batch_size_input.setValue(normalize_batch_size(config.get("batch_size", 30)))
         self.classification_workers_input.setValue(
             normalize_classification_workers(config.get("classification_workers", 2))
         )

@@ -519,24 +519,24 @@ HTML_TEMPLATE = Template(
       <article
         class="cluster-card"
         data-category-id="{{ category.id }}"
-        data-search="{{ category.search_text }}"
+        data-search="{{ category.search_text | e }}"
         style="background:{{ category.color.surface }}; border-color:{{ category.color.border }};"
       >
         <div class="cluster-header">
           <div class="cluster-topline">
-            <h2 class="cluster-name">{{ category.name }}</h2>
+            <h2 class="cluster-name">{{ category.name | e }}</h2>
             <div class="cluster-count" style="background:{{ category.color.pill }}; color:{{ category.color.accent }};">{{ category.count }} 个</div>
           </div>
-          <div class="cluster-meta">{{ category.top_types or "混合文件类型" }}</div>
+          <div class="cluster-meta">{{ (category.top_types or "混合文件类型") | e }}</div>
         </div>
         <div class="cluster-body">
           <div class="cluster-preview">
-            {% for file in category.preview_files %}
+          {% for file in category.preview_files %}
             <div class="preview-item">
               <div class="icon-badge {{ file.ext_class }}">{{ file.ext_label }}</div>
               <div>
-                <div class="preview-title" title="{{ file.file_name }}">{{ file.file_name }}</div>
-                <div class="preview-brief">{{ file.display_brief }}</div>
+                <div class="preview-title" title="{{ file.file_name | e }}">{{ file.file_name | e }}</div>
+                <div class="preview-brief">{{ file.display_brief | e }}</div>
               </div>
             </div>
             {% endfor %}
@@ -739,7 +739,8 @@ HTML_TEMPLATE = Template(
   </script>
 </body>
 </html>
-"""
+""",
+    autoescape=True,
 )
 
 
@@ -922,6 +923,10 @@ def _category_search_text(category_name: str, files: list[dict]) -> str:
     return " ".join(parts)
 
 
+def _safe_json_for_script(payload: dict[str, object]) -> str:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+
+
 def generate_reports(records: list[dict], html_path: str = "report.html", json_path: str = "report.json") -> None:
     prepared = prepare_records(records)
     grouped: dict[str, list[dict]] = defaultdict(list)
@@ -989,6 +994,6 @@ def generate_reports(records: list[dict], html_path: str = "report.html", json_p
         categorized_files=sum(1 for record in prepared if _clean_category_name(record.get("category")) != "未分类"),
         summarized_files=sum(1 for record in prepared if str(record.get("summary") or "").strip()),
         categories=categories,
-        report_data_json=json.dumps(report_data, ensure_ascii=False, separators=(",", ":")),
+        report_data_json=_safe_json_for_script(report_data),
     )
     Path(html_path).write_text(html, encoding="utf-8")

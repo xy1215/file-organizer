@@ -62,8 +62,9 @@ scan:
     - "__pycache__"
     - "AppData"
 
-batch_size: 80
+batch_size: 30
 classification_workers: 2
+summary_workers: 4
 ```
 
 说明：
@@ -73,7 +74,9 @@ classification_workers: 2
 - `model` 用于分类
 - `summary_model` 用于摘要
 - `paths` 是额外扫描目录，默认的桌面、文档、下载始终会扫描
+- `batch_size` 建议从 10-30 起步，路径很长或使用兼容后端时更稳妥
 - `classification_workers` 控制分类并发请求数（1-4），默认 2
+- `summary_workers` 控制摘要并发请求数（1-8），默认 4
 
 ## 使用方法
 

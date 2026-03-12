@@ -10,7 +10,8 @@ from collections.abc import Iterator
 from typing import Any
 
 import anthropic
-from openai import OpenAI
+from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError
+from openai import BadRequestError, NotFoundError, OpenAI, RateLimitError
 
 
 DEFAULT_CATEGORIES = [
@@ -96,12 +97,37 @@ class LLMClient:
                 return func()
             except Exception as exc:
                 last_error = exc
+                if self._is_retryable_error(exc) is False:
+                    break
                 if index == len(delays):
                     break
                 if delay > 0:
                     time.sleep(delay)
         assert last_error is not None
         raise last_error
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        permanent_openai_errors = (AuthenticationError, BadRequestError, NotFoundError)
+        if isinstance(exc, permanent_openai_errors):
+            return False
+
+        status_code = getattr(exc, "status_code", None)
+        if isinstance(exc, APIStatusError) and status_code is not None:
+            return status_code >= 500 or status_code == 429
+
+        anthropic_status = getattr(exc, "status_code", None)
+        anthropic_type = exc.__class__.__name__
+        if anthropic_type in {"AuthenticationError", "NotFoundError", "BadRequestError"}:
+            return False
+        if anthropic_status is not None:
+            return anthropic_status >= 500 or anthropic_status == 429
+
+        if isinstance(exc, (APIConnectionError, APITimeoutError, RateLimitError)):
+            return True
+        if isinstance(exc, json.JSONDecodeError):
+            return False
+        return True
 
     def _extract_text_content(self, response_text: str) -> dict[str, Any]:
         try:
@@ -118,12 +144,7 @@ class LLMClient:
 
         def _call() -> dict[str, Any]:
             if self.provider == "openai":
-                response = self.openai_client.responses.create(
-                    model=model_name,
-                    input=prompt,
-                    text={"format": {"type": "json_object"}},
-                )
-                text = response.output_text
+                text = self._complete_openai_json(prompt, model_name)
             else:
                 response = self.anthropic_client.messages.create(
                     model=model_name,
@@ -137,6 +158,24 @@ class LLMClient:
             return self._extract_text_content(text)
 
         return self._retry(_call)
+
+    def _complete_openai_json(self, prompt: str, model_name: str) -> str:
+        if self.base_url:
+            response = self.openai_client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            message = response.choices[0].message if response.choices else None
+            return str(getattr(message, "content", "") or "")
+
+        response = self.openai_client.responses.create(
+            model=model_name,
+            input=prompt,
+            text={"format": {"type": "json_object"}},
+        )
+        return response.output_text
 
 
 def chunk_list(items: list[Any], size: int) -> Iterator[list[Any]]:
