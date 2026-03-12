@@ -224,6 +224,28 @@ class CacheDB:
         ).fetchall()
         return [dict(row) for row in rows]
 
+    def filter_paths_with_category(self, file_paths: list[str]) -> list[str]:
+        if not file_paths:
+            return []
+
+        matched: list[str] = []
+        with self.conn:
+            for chunk in self._chunked(file_paths, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                rows = self.conn.execute(
+                    f"""
+                    SELECT file_path
+                    FROM file_cache
+                    WHERE file_path IN ({placeholders})
+                    AND category IS NOT NULL
+                    AND TRIM(category) != ''
+                    ORDER BY file_path
+                    """,
+                    tuple(chunk),
+                ).fetchall()
+                matched.extend(row["file_path"] for row in rows)
+        return matched
+
     def index_by_path(self) -> dict[str, CacheRecord]:
         rows = self.conn.execute("SELECT * FROM file_cache").fetchall()
         return {

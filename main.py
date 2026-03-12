@@ -97,12 +97,8 @@ def _select_summary_targets(
     candidate_paths: list[str] | None = None,
 ) -> list[str]:
     if candidate_paths is not None:
-        targets: list[str] = []
-        for path in candidate_paths:
-            record = cache.get(path)
-            if record and (record.category or "").strip():
-                targets.append(path)
-        return sorted(dict.fromkeys(targets))
+        deduped = list(dict.fromkeys(candidate_paths))
+        return cache.filter_paths_with_category(deduped)
 
     if file_path:
         return [str(Path(file_path).expanduser().resolve())]
