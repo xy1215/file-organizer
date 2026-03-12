@@ -17,3 +17,6 @@ scan:
 
 # 分类批次大小
 batch_size: 80
+
+# 分类并发请求数（1-4）
+classification_workers: 2

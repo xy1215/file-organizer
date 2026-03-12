@@ -40,8 +40,11 @@ def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
     path = Path(config_path)
     if not path.exists():
         raise click.ClickException("未找到 config.yaml，请先检查项目目录。")
-    with path.open("r", encoding="utf-8") as handle:
-        loaded = yaml.safe_load(handle) or {}
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle) or {}
+    except yaml.YAMLError as exc:
+        raise click.ClickException(f"config.yaml 格式错误，请先修正 YAML 语法：{exc}") from exc
     if not isinstance(loaded, dict):
         console.print("[yellow]config.yaml 顶层结构无效，已按空配置处理。[/yellow]")
         return {}
@@ -89,6 +92,16 @@ def get_summary_workers(config: dict[str, Any]) -> int:
         console.print("[yellow]summary_workers 配置无效，已使用默认值 4。[/yellow]")
         value = 4
     return min(8, max(1, value))
+
+
+def get_classification_workers(config: dict[str, Any]) -> int:
+    raw = config.get("classification_workers", 2)
+    try:
+        value = int(raw or 2)
+    except (TypeError, ValueError):
+        console.print("[yellow]classification_workers 配置无效，已使用默认值 2。[/yellow]")
+        value = 2
+    return min(4, max(1, value))
 
 
 def _select_summary_targets(
@@ -202,11 +215,17 @@ def _scan_and_classify(cache: CacheDB, config: dict[str, Any], force: bool = Fal
             raise click.ClickException(str(exc)) from exc
 
         batch_size = get_batch_size(config)
-        console.print(f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理。[/cyan]")
+        classification_workers = min(get_classification_workers(config), max(1, (len(pending) + batch_size - 1) // batch_size))
+        console.print(
+            f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理（并发 {classification_workers}）。[/cyan]"
+        )
 
         failed_batches = 0
         for done, total, batch, batch_results, batch_error in classify_files_iter(
-            client, pending, batch_size=batch_size
+            client,
+            pending,
+            batch_size=batch_size,
+            workers=classification_workers,
         ):
             batch_path_map: dict[str, str] = {}
             batch_id_map: dict[str, str] = {}

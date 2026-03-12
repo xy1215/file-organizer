@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from collections.abc import Iterator
 from typing import Any
@@ -174,20 +175,31 @@ def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
 """.strip()
 
 
-def classify_files(client: LLMClient, files: list[dict[str, Any]], batch_size: int) -> list[dict[str, Any]]:
+def classify_files(
+    client: LLMClient,
+    files: list[dict[str, Any]],
+    batch_size: int,
+    workers: int = 1,
+) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
-    for _, _, _, batch_results, _ in classify_files_iter(client, files, batch_size=batch_size):
+    for _, _, _, batch_results, _ in classify_files_iter(
+        client,
+        files,
+        batch_size=batch_size,
+        workers=workers,
+    ):
         results.extend(batch_results)
     return results
 
 
 def classify_files_iter(
-    client: LLMClient, files: list[dict[str, Any]], batch_size: int
+    client: LLMClient,
+    files: list[dict[str, Any]],
+    batch_size: int,
+    workers: int = 1,
 ) -> Iterator[tuple[int, int, list[dict[str, Any]], list[dict[str, Any]], str | None]]:
     """Yield (completed_count, total_count, batch, batch_results, error_message) after each batch."""
-    total = len(files)
-    done = 0
-    for batch in chunk_list(files, batch_size):
+    def process_batch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
         error_message: str | None = None
         batch_results: list[dict[str, Any]] = []
         try:
@@ -198,8 +210,29 @@ def classify_files_iter(
                 batch_results = [item for item in raw_results if isinstance(item, dict)]
         except Exception as exc:
             error_message = str(exc) or exc.__class__.__name__
-        done += len(batch)
-        yield done, total, batch, batch_results, error_message
+        return batch_results, error_message
+
+    total = len(files)
+    done = 0
+    batches = list(chunk_list(files, batch_size))
+    worker_count = min(max(1, workers), len(batches))
+    if worker_count <= 1:
+        for batch in batches:
+            batch_results, error_message = process_batch(batch)
+            done += len(batch)
+            yield done, total, batch, batch_results, error_message
+        return
+
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        future_map = {
+            executor.submit(process_batch, batch): batch
+            for batch in batches
+        }
+        for future in as_completed(future_map):
+            batch = future_map[future]
+            batch_results, error_message = future.result()
+            done += len(batch)
+            yield done, total, batch, batch_results, error_message
 
 
 def build_summary_prompt(file_path: str, extracted_text: str) -> str:
