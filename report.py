@@ -830,6 +830,11 @@ def display_brief(record: dict) -> str:
     return brief or "暂时没有简短描述"
 
 
+def _clean_category_name(value: object) -> str:
+    name = str(value or "").strip()
+    return name or "未分类"
+
+
 def _format_modified_time(value: object) -> str:
     try:
         timestamp = float(value)
@@ -904,7 +909,7 @@ def generate_reports(records: list[dict], html_path: str = "report.html", json_p
     prepared = prepare_records(records)
     grouped: dict[str, list[dict]] = defaultdict(list)
     for record in prepared:
-        grouped[record.get("category") or "未分类"].append(record)
+        grouped[_clean_category_name(record.get("category"))].append(record)
 
     grouped = dict(sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])))
 
@@ -964,8 +969,8 @@ def generate_reports(records: list[dict], html_path: str = "report.html", json_p
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         total_files=len(prepared),
         total_categories=len(categories),
-        categorized_files=sum(1 for record in prepared if record.get("category")),
-        summarized_files=sum(1 for record in prepared if record.get("summary")),
+        categorized_files=sum(1 for record in prepared if _clean_category_name(record.get("category")) != "未分类"),
+        summarized_files=sum(1 for record in prepared if str(record.get("summary") or "").strip()),
         categories=categories,
         report_data_json=json.dumps(report_data, ensure_ascii=False),
     )

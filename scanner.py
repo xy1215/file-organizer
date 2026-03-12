@@ -44,7 +44,7 @@ def normalize_scan_paths(extra_paths: list[str] | None = None) -> list[Path]:
             resolved = expanded.resolve(strict=False)
         except OSError:
             resolved = expanded
-        key = str(resolved).lower()
+        key = os.path.normcase(str(resolved))
         if key in seen:
             continue
         seen.add(key)
@@ -63,7 +63,7 @@ def _is_relative_to(path: Path, base: Path) -> bool:
 def compact_scan_roots(roots: list[Path]) -> list[Path]:
     """Drop nested scan roots to avoid duplicate traversal for overlapping paths."""
     compacted: list[Path] = []
-    for root in sorted(roots, key=lambda item: (len(str(item)), str(item).lower())):
+    for root in sorted(roots, key=lambda item: (len(str(item)), os.path.normcase(str(item)))):
         if any(_is_relative_to(root, existing) for existing in compacted):
             continue
         compacted.append(root)
@@ -74,16 +74,12 @@ def should_exclude_dir(dir_name: str, exclude_patterns: set[str]) -> bool:
     return dir_name.startswith(".") or dir_name.lower() in exclude_patterns
 
 
-def is_valid_file(path: Path) -> bool:
+def is_valid_file(path: Path, file_size: int) -> bool:
     if path.name.startswith("~$") or path.name.startswith("."):
         return False
     if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         return False
-    try:
-        if path.stat().st_size == 0:
-            return False
-    except OSError:
-        logging.exception("读取文件大小失败: %s", path)
+    if file_size == 0:
         return False
     return True
 
@@ -103,19 +99,19 @@ def scan_files(paths: list[str] | None = None, exclude_patterns: list[str] | Non
             dirnames[:] = [d for d in dirnames if not should_exclude_dir(d, exclude_set)]
             for filename in filenames:
                 file_path = Path(current_root) / filename
-                if not is_valid_file(file_path):
-                    continue
                 try:
                     stat = file_path.stat()
                 except OSError:
                     logging.exception("读取文件信息失败: %s", file_path)
+                    continue
+                if not is_valid_file(file_path, stat.st_size):
                     continue
                 try:
                     resolved_file = file_path.resolve()
                 except OSError:
                     logging.exception("规范化文件路径失败: %s", file_path)
                     continue
-                resolved_key = str(resolved_file).lower()
+                resolved_key = os.path.normcase(str(resolved_file))
                 if resolved_key in seen_files:
                     continue
                 seen_files.add(resolved_key)
@@ -127,5 +123,5 @@ def scan_files(paths: list[str] | None = None, exclude_patterns: list[str] | Non
                         modified_time=stat.st_mtime,
                     )
                 )
-    scanned.sort(key=lambda item: item.file_path.lower())
+    scanned.sort(key=lambda item: os.path.normcase(item.file_path))
     return scanned
