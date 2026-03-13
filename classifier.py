@@ -13,7 +13,7 @@ import anthropic
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError
 from openai import BadRequestError, NotFoundError, OpenAI, RateLimitError
 
-from common import ensure_dict
+from common import OperationCancelled, ensure_dict
 
 
 DEFAULT_CATEGORIES = [
@@ -238,7 +238,7 @@ def classify_files_iter(
     if worker_count <= 1:
         for batch in batches:
             if is_cancelled and is_cancelled():
-                raise RuntimeError("任务已取消。")
+                raise OperationCancelled()
             batch_results, error_message = process_batch(batch)
             done += len(batch)
             yield done, total, batch, batch_results, error_message
@@ -252,12 +252,12 @@ def classify_files_iter(
         try:
             for future in as_completed(future_map):
                 if is_cancelled and is_cancelled():
-                    raise RuntimeError("任务已取消。")
+                    raise OperationCancelled()
                 batch = future_map[future]
                 batch_results, error_message = future.result()
                 done += len(batch)
                 yield done, total, batch, batch_results, error_message
-        except RuntimeError:
+        except OperationCancelled:
             executor.shutdown(wait=False, cancel_futures=True)
             raise
 

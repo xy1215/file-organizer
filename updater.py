@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.request
@@ -23,6 +25,10 @@ class UpdateInfo:
     version: str
     download_url: str
     changelog: str
+
+
+class UpdateCancelled(Exception):
+    pass
 
 
 def _normalize_version(value: str) -> Version:
@@ -79,34 +85,50 @@ def download_update(
     url: str,
     dest_dir: Path,
     on_progress: Callable[[int, int], None] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     zip_path = dest_dir / "file-organizer-update.zip"
-    with urllib.request.urlopen(url, timeout=30) as response, zip_path.open("wb") as handle:
-        total = int(response.headers.get("Content-Length", "0") or 0)
-        downloaded = 0
-        while True:
-            chunk = response.read(1024 * 128)
-            if not chunk:
-                break
-            handle.write(chunk)
-            downloaded += len(chunk)
-            if on_progress:
-                on_progress(downloaded, total)
+    try:
+        with urllib.request.urlopen(url, timeout=30) as response, zip_path.open("wb") as handle:
+            total = int(response.headers.get("Content-Length", "0") or 0)
+            downloaded = 0
+            while True:
+                if is_cancelled and is_cancelled():
+                    raise UpdateCancelled()
+                chunk = response.read(1024 * 128)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                downloaded += len(chunk)
+                if on_progress:
+                    on_progress(downloaded, total)
+    except Exception:
+        if zip_path.exists():
+            zip_path.unlink(missing_ok=True)
+        raise
     return zip_path
 
 
 def apply_update(zip_path: Path, app_dir: Path) -> None:
+    if sys.platform != "win32":
+        raise RuntimeError("自动更新仅支持 Windows 打包版。")
     update_dir = app_dir / "_update"
     updater_script = app_dir / "_updater.bat"
     if update_dir.exists():
         shutil.rmtree(update_dir, ignore_errors=True)
     update_dir.mkdir(parents=True, exist_ok=True)
 
+    resolved_update_dir = update_dir.resolve()
     with zipfile.ZipFile(zip_path, "r") as archive:
+        for info in archive.infolist():
+            target = (update_dir / info.filename).resolve()
+            if os.path.commonpath([str(resolved_update_dir), str(target)]) != str(resolved_update_dir):
+                raise ValueError(f"危险路径: {info.filename}")
         archive.extractall(update_dir)
 
     script_content = """@echo off
+cd /d "%~dp0"
 timeout /t 2 /nobreak >nul
 xcopy /s /y /q "_update\\*" "." >nul
 rmdir /s /q "_update"

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import sys
 import threading
 import time
@@ -36,10 +35,10 @@ from PySide6.QtWidgets import (
 )
 
 from app_paths import app_path, get_app_dir
-from common import ensure_dict, ensure_str_list
-from main import OperationCancelled, RuntimeHooks, run_report, run_scan, run_stats, run_summarize
+from common import OperationCancelled, ensure_dict, ensure_str_list
+from main import RuntimeHooks, run_report, run_scan, run_stats, run_summarize
 from main import run_sync
-from updater import UpdateInfo, apply_update, check_for_update, download_update, make_download_dir
+from updater import UpdateCancelled, UpdateInfo, apply_update, check_for_update, download_update, make_download_dir
 from version import __version__
 
 
@@ -56,11 +55,15 @@ class UpdateCheckWorker(QThread):
 
 class UpdateDownloadWorker(QThread):
     progress_changed = Signal(int, int)
-    finished_update = Signal(str, str)
+    finished_update = Signal(str, str, bool)
 
     def __init__(self, update_info: UpdateInfo, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.update_info = update_info
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
 
     def run(self) -> None:
         try:
@@ -68,11 +71,15 @@ class UpdateDownloadWorker(QThread):
                 self.update_info.download_url,
                 make_download_dir(),
                 on_progress=lambda current, total: self.progress_changed.emit(current, total),
+                is_cancelled=self._cancel_event.is_set,
             )
-        except Exception as exc:
-            self.finished_update.emit("", str(exc))
+        except UpdateCancelled:
+            self.finished_update.emit("", "", True)
             return
-        self.finished_update.emit(str(zip_path), "")
+        except Exception as exc:
+            self.finished_update.emit("", str(exc), False)
+            return
+        self.finished_update.emit(str(zip_path), "", False)
 
 
 def default_config() -> dict[str, Any]:
@@ -201,7 +208,7 @@ def normalize_auto_scan_interval(raw_value: Any) -> int:
 class CommandWorker(QThread):
     log = Signal(str)
     progress = Signal(str, int, int, str)
-    finished_status = Signal(bool, str)
+    finished_status = Signal(bool, str, bool)
 
     def __init__(self, args: list[str]) -> None:
         super().__init__()
@@ -215,11 +222,11 @@ class CommandWorker(QThread):
         try:
             self._dispatch()
         except OperationCancelled:
-            self.finished_status.emit(False, "任务已取消。")
+            self.finished_status.emit(False, "任务已取消。", True)
         except Exception as exc:
-            self.finished_status.emit(False, f"执行失败：{exc}")
+            self.finished_status.emit(False, f"执行失败：{exc}", False)
         else:
-            self.finished_status.emit(True, "")
+            self.finished_status.emit(True, "", False)
 
     def _dispatch(self) -> None:
         hooks = RuntimeHooks(
@@ -620,10 +627,9 @@ class MainWindow(QMainWindow):
         self.worker.finished_status.connect(self._on_worker_finished)
         self.worker.start()
 
-    def _on_worker_finished(self, success: bool, message: str) -> None:
+    def _on_worker_finished(self, success: bool, message: str, cancelled: bool) -> None:
         self.elapsed_timer.stop()
         self._refresh_elapsed_time()
-        cancelled = message == "任务已取消。"
         self.status_label.setText("已完成" if success else ("已取消" if cancelled else "执行失败"))
         self.phase_label.setText("任务完成" if success else ("任务已取消" if cancelled else "任务失败"))
         if self.current_total:
@@ -676,6 +682,9 @@ class MainWindow(QMainWindow):
     def _handle_update_now(self) -> None:
         if self.available_update is None:
             return
+        if sys.platform != "win32":
+            QMessageBox.information(self, "当前平台不支持", "自动更新仅支持 Windows 打包版。")
+            return
         if self.worker and self.worker.isRunning():
             QMessageBox.information(self, "任务进行中", "请先等待当前任务完成，再执行更新。")
             return
@@ -704,12 +713,16 @@ class MainWindow(QMainWindow):
 
     def _on_update_download_cancel_requested(self) -> None:
         if self.update_download_worker and self.update_download_worker.isRunning():
-            self.update_progress_dialog.setLabelText("当前下载不支持中途取消，请稍候完成。")
+            self.update_progress_dialog.setLabelText("正在取消下载...")
+            self.update_download_worker.cancel()
 
-    def _on_update_download_finished(self, zip_path: str, error: str) -> None:
+    def _on_update_download_finished(self, zip_path: str, error: str, cancelled: bool) -> None:
         if self.update_progress_dialog is not None:
             self.update_progress_dialog.close()
             self.update_progress_dialog = None
+        if cancelled:
+            QMessageBox.information(self, "已取消", "更新下载已取消。")
+            return
         if error:
             QMessageBox.warning(self, "更新失败", f"下载更新失败：{error}")
             return
@@ -742,7 +755,6 @@ class MainWindow(QMainWindow):
         webbrowser.open(REPORT_PATH.resolve().as_uri())
 
     def _append_log(self, message: str) -> None:
-        self._update_progress_from_log(message)
         self.log_output.appendPlainText(message)
         cursor = self.log_output.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -787,61 +799,6 @@ class MainWindow(QMainWindow):
             return
         if phase == "done":
             self.phase_label.setText(detail or "任务完成")
-
-    def _update_progress_from_log(self, message: str) -> None:
-        plain = self._strip_rich_markup(message)
-        if "正在扫描目录" in plain:
-            self.phase_label.setText("正在扫描目录...")
-            self._set_busy_progress()
-            return
-        if "正在检查缓存" in plain:
-            self.phase_label.setText("扫描完成，正在检查缓存...")
-            self._set_busy_progress()
-            return
-        if "开始分类" in plain or "缓存检查完成，开始分类" in plain:
-            self.phase_label.setText("正在调用模型进行分类...")
-            self._set_busy_progress()
-        if "正在生成摘要" in plain or "开始生成摘要" in plain:
-            self.phase_label.setText("正在生成摘要...")
-            self._set_busy_progress()
-        if "正在生成报告" in plain or "正在刷新报告" in plain:
-            self.phase_label.setText("正在生成报告...")
-            self._set_busy_progress()
-            return
-        if "正在读取缓存统计" in plain:
-            self.phase_label.setText("正在读取缓存统计...")
-            self._set_busy_progress()
-            return
-
-        match = re.search(r"进度：(\d+)/(\d+)", plain)
-        if match:
-            current = int(match.group(1))
-            total = int(match.group(2))
-            self.current_progress = current
-            self.current_total = total
-            value = int(current * 100 / total) if total else 0
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(value)
-            self.progress_bar.setFormat(f"{current}/{total}")
-            self.progress_detail_label.setText(f"进度：{current}/{total}")
-            self.phase_label.setText(plain)
-            return
-
-        total_match = re.search(r"共\s+(\d+)\s+个文件待处理", plain)
-        if total_match:
-            self.current_total = int(total_match.group(1))
-            self.current_progress = 0
-            self.progress_detail_label.setText(f"进度：0/{self.current_total}")
-            return
-
-        if "执行失败" in plain or "摘要失败" in plain:
-            self.phase_label.setText("任务出现错误，请查看日志。")
-            return
-        if "扫描完成" in plain or "摘要任务完成" in plain or "报告已生成" in plain:
-            self.phase_label.setText(plain)
-
-    def _strip_rich_markup(self, message: str) -> str:
-        return re.sub(r"\[[^\]]+\]", "", message).strip()
 
     def _refresh_elapsed_time(self) -> None:
         if self.started_at is None:

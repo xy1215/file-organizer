@@ -15,7 +15,7 @@ from rich.console import Console
 from app_paths import app_path
 from cache import CacheDB
 from classifier import LLMClient, build_file_stub, classify_files_iter, summarize_text
-from common import ensure_dict, ensure_str_list
+from common import OperationCancelled, ensure_dict, ensure_str_list
 from report import generate_reports
 from scanner import scan_files
 from summarizer import UnsupportedSummaryError, extract_text
@@ -33,11 +33,6 @@ logging.basicConfig(
 LogCallback = Callable[[str], None]
 ProgressCallback = Callable[[str, int, int, str], None]
 CancelChecker = Callable[[], bool]
-
-
-class OperationCancelled(click.ClickException):
-    def __init__(self) -> None:
-        super().__init__("任务已取消。")
 
 
 @dataclass
@@ -275,63 +270,58 @@ def _scan_and_classify(
         _progress("classify", 0, len(pending), "正在调用模型进行分类...", hooks)
 
         failed_batches = 0
-        try:
-            for done, total, batch, batch_results, batch_error in classify_files_iter(
-                client,
-                pending,
-                batch_size=batch_size,
-                workers=classification_workers,
-                is_cancelled=hooks.is_cancelled if hooks else None,
-            ):
-                _raise_if_cancelled(hooks)
-                batch_path_map: dict[str, str] = {}
-                batch_id_map: dict[str, str] = {}
-                for item in batch:
-                    batch_file_path = str(item.get("file_path") or "").strip()
-                    normalized = _normalize_file_path(batch_file_path)
-                    if normalized:
-                        batch_path_map.setdefault(normalized, batch_file_path)
-                    file_id = _normalize_file_id(str(item.get("file_id") or ""))
-                    if file_id:
-                        batch_id_map.setdefault(file_id, batch_file_path)
-                update_rows: list[tuple[str, str, str | None]] = []
-                covered_paths: set[str] = set()
+        for done, total, batch, batch_results, batch_error in classify_files_iter(
+            client,
+            pending,
+            batch_size=batch_size,
+            workers=classification_workers,
+            is_cancelled=hooks.is_cancelled if hooks else None,
+        ):
+            _raise_if_cancelled(hooks)
+            batch_path_map: dict[str, str] = {}
+            batch_id_map: dict[str, str] = {}
+            for item in batch:
+                batch_file_path = str(item.get("file_path") or "").strip()
+                normalized = _normalize_file_path(batch_file_path)
+                if normalized:
+                    batch_path_map.setdefault(normalized, batch_file_path)
+                file_id = _normalize_file_id(str(item.get("file_id") or ""))
+                if file_id:
+                    batch_id_map.setdefault(file_id, batch_file_path)
+            update_rows: list[tuple[str, str, str | None]] = []
+            covered_paths: set[str] = set()
 
-                if batch_error:
-                    failed_batches += 1
-                    _log(
-                        f"[yellow]警告：批次分类失败，已跳过该批次（{done}/{total}）：{batch_error}[/yellow]"
-                        ,
-                        hooks,
-                    )
+            if batch_error:
+                failed_batches += 1
+                _log(
+                    f"[yellow]警告：批次分类失败，已跳过该批次（{done}/{total}）：{batch_error}[/yellow]"
+                    ,
+                    hooks,
+                )
 
-                for item in batch_results:
-                    file_id = _normalize_file_id(str(item.get("file_id") or ""))
-                    file_path = str(item.get("file_path") or "").strip()
-                    category = str(item.get("category") or "").strip()
-                    matched_path = batch_id_map.get(file_id) if file_id else None
-                    if not matched_path:
-                        normalized = _normalize_file_path(file_path)
-                        matched_path = batch_path_map.get(normalized)
-                    if not category or not matched_path:
-                        continue
-                    brief = str(item.get("brief") or "").strip() or None
-                    if matched_path in covered_paths:
-                        continue
-                    covered_paths.add(matched_path)
-                    update_rows.append((matched_path, category, brief))
+            for item in batch_results:
+                file_id = _normalize_file_id(str(item.get("file_id") or ""))
+                file_path = str(item.get("file_path") or "").strip()
+                category = str(item.get("category") or "").strip()
+                matched_path = batch_id_map.get(file_id) if file_id else None
+                if not matched_path:
+                    normalized = _normalize_file_path(file_path)
+                    matched_path = batch_path_map.get(normalized)
+                if not category or not matched_path:
+                    continue
+                brief = str(item.get("brief") or "").strip() or None
+                if matched_path in covered_paths:
+                    continue
+                covered_paths.add(matched_path)
+                update_rows.append((matched_path, category, brief))
 
-                classified += cache.update_categories_bulk(update_rows)
-                missing = len(set(batch_path_map.values()) - covered_paths)
-                if missing:
-                    _log(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]", hooks)
-                detail = f"进度：{done}/{total} - 已分类 {classified} 个文件"
-                _log(detail, hooks)
-                _progress("classify", done, total, detail, hooks)
-        except RuntimeError as exc:
-            if str(exc) == "任务已取消。":
-                raise OperationCancelled() from exc
-            raise
+            classified += cache.update_categories_bulk(update_rows)
+            missing = len(set(batch_path_map.values()) - covered_paths)
+            if missing:
+                _log(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]", hooks)
+            detail = f"进度：{done}/{total} - 已分类 {classified} 个文件"
+            _log(detail, hooks)
+            _progress("classify", done, total, detail, hooks)
         if failed_batches:
             _log(
                 f"[yellow]分类阶段有 {failed_batches} 个批次失败，其他批次已继续处理。可稍后执行 sync/scan 重试。[/yellow]"
