@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from PySide6.QtCore import QThread, Qt, QTimer, Signal
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import QThread, Qt, QTimer, Signal, QUrl
+from PySide6.QtGui import QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -752,7 +752,16 @@ class MainWindow(QMainWindow):
         if not REPORT_PATH.exists():
             QMessageBox.information(self, "报告不存在", "还没有 report.html，请先执行扫描或生成报告。")
             return
-        webbrowser.open(REPORT_PATH.resolve().as_uri())
+        report_url = QUrl.fromLocalFile(str(REPORT_PATH.resolve()))
+        if QDesktopServices.openUrl(report_url):
+            return
+        if webbrowser.open(report_url.toString()):
+            return
+        QMessageBox.warning(
+            self,
+            "打开失败",
+            f"无法自动打开 HTML 报告，请手动打开：\n{REPORT_PATH.resolve()}",
+        )
 
     def _append_log(self, message: str) -> None:
         self.log_output.appendPlainText(message)
