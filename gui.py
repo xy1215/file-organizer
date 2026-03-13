@@ -12,11 +12,13 @@ from PySide6.QtCore import QThread, Qt, QTimer, Signal, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
+    QBoxLayout,
     QCheckBox,
     QFileDialog,
     QFormLayout,
     QFrame,
     QGroupBox,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -29,6 +31,7 @@ from PySide6.QtWidgets import (
     QProgressDialog,
     QPlainTextEdit,
     QRadioButton,
+    QScrollArea,
     QSpinBox,
     QSizePolicy,
     QVBoxLayout,
@@ -39,7 +42,15 @@ from app_paths import app_path, get_app_dir
 from common import OperationCancelled, ensure_dict, ensure_str_list
 from main import RuntimeHooks, run_report, run_scan, run_stats, run_summarize
 from main import run_sync
-from updater import UpdateCancelled, UpdateInfo, apply_update, check_for_update, download_update, make_download_dir
+from updater import (
+    UpdateCancelled,
+    UpdateCheckResult,
+    UpdateInfo,
+    apply_update,
+    check_for_update_status,
+    download_update,
+    make_download_dir,
+)
 from version import __version__
 
 
@@ -51,7 +62,7 @@ class UpdateCheckWorker(QThread):
     checked = Signal(object)
 
     def run(self) -> None:
-        self.checked.emit(check_for_update(__version__))
+        self.checked.emit(check_for_update_status(__version__))
 
 
 class UpdateDownloadWorker(QThread):
@@ -282,9 +293,16 @@ class MainWindow(QMainWindow):
         self.auto_scan_timer.timeout.connect(self._trigger_auto_sync)
 
         self.setWindowTitle(f"文件整理助手 v{__version__}")
-        self.resize(1100, 760)
+        self.resize(920, 680)
+        self.setMinimumSize(760, 560)
         self._apply_theme()
         self._setup_menu_bar()
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         central = QWidget()
         central.setObjectName("centralSurface")
@@ -297,11 +315,13 @@ class MainWindow(QMainWindow):
         root.addLayout(self._build_top_area())
         root.addWidget(self._build_log_area(), stretch=1)
 
-        self.setCentralWidget(central)
+        scroll.setWidget(central)
+        self.setCentralWidget(scroll)
         self._load_into_form(load_config())
         self.current_command: list[str] = []
         self._update_run_buttons()
         self._refresh_status_badges()
+        self._apply_responsive_layouts()
         self._start_update_check()
 
     def _apply_theme(self) -> None:
@@ -518,7 +538,8 @@ class MainWindow(QMainWindow):
     def _build_hero_section(self) -> QFrame:
         card = QFrame()
         card.setObjectName("heroCard")
-        layout = QHBoxLayout(card)
+        layout = QBoxLayout(QBoxLayout.LeftToRight, card)
+        self.hero_layout = layout
         layout.setContentsMargins(22, 18, 22, 18)
         layout.setSpacing(18)
 
@@ -602,7 +623,8 @@ class MainWindow(QMainWindow):
         return self.update_banner
 
     def _build_top_area(self) -> QHBoxLayout:
-        layout = QHBoxLayout()
+        layout = QBoxLayout(QBoxLayout.LeftToRight)
+        self.top_area_layout = layout
         layout.setSpacing(14)
         layout.addWidget(self._build_config_panel(), stretch=3)
         layout.addWidget(self._build_action_panel(), stretch=2)
@@ -768,16 +790,17 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
 
-        status_row = QHBoxLayout()
-        status_row.setSpacing(10)
+        status_row = QGridLayout()
+        status_row.setHorizontalSpacing(10)
+        status_row.setVerticalSpacing(10)
         self.status_label = self._make_metric_card("状态", "空闲")
         self.phase_label = self._make_metric_card("阶段", "等待开始")
         self.elapsed_label = self._make_metric_card("耗时", "00:00")
         self.progress_detail_label = self._make_metric_card("进度", "未开始")
-        status_row.addWidget(self.status_label)
-        status_row.addWidget(self.phase_label)
-        status_row.addWidget(self.elapsed_label)
-        status_row.addWidget(self.progress_detail_label)
+        status_row.addWidget(self.status_label, 0, 0)
+        status_row.addWidget(self.phase_label, 0, 1)
+        status_row.addWidget(self.elapsed_label, 1, 0)
+        status_row.addWidget(self.progress_detail_label, 1, 1)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1)
@@ -987,7 +1010,7 @@ class MainWindow(QMainWindow):
         manual = self._manual_update_check_pending
         self._manual_update_check_pending = False
         self.update_check_worker = None
-        if not isinstance(update_info, UpdateInfo):
+        if not isinstance(update_info, UpdateCheckResult):
             if manual:
                 QMessageBox.information(
                     self,
@@ -995,23 +1018,31 @@ class MainWindow(QMainWindow):
                     "当前未发现可用更新，或暂时无法连接更新服务器。",
                 )
             return
-        if self.ignored_update_version == update_info.version:
+        if update_info.info is None:
             if manual:
                 QMessageBox.information(
                     self,
                     "检查更新",
-                    f"发现新版本 v{update_info.version}，但已在本次启动中忽略。你仍可点击顶部提示条继续更新。",
+                    update_info.reason or "当前未发现可用更新。",
                 )
             return
-        self.available_update = update_info
-        self.update_label.setText(f"发现新版本 v{update_info.version}，点击更新")
+        if self.ignored_update_version == update_info.info.version:
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "检查更新",
+                    f"发现新版本 v{update_info.info.version}，但已在本次启动中忽略。你仍可点击顶部提示条继续更新。",
+                )
+            return
+        self.available_update = update_info.info
+        self.update_label.setText(f"发现新版本 v{update_info.info.version}，点击更新")
         self.update_banner.show()
         self._refresh_status_badges()
         if manual:
             QMessageBox.information(
                 self,
                 "检查更新",
-                f"发现新版本 v{update_info.version}，可通过顶部提示条立即更新。",
+                f"发现新版本 v{update_info.info.version}，可通过顶部提示条立即更新。",
             )
 
     def _ignore_current_update(self) -> None:
@@ -1164,6 +1195,15 @@ class MainWindow(QMainWindow):
         self.hero_status_caption.setText("有新版本可用" if self.update_banner.isVisible() else "当前未挂起更新")
         self.hero_phase_value.setText("自动巡检开启" if self.auto_scan_checkbox.isChecked() else "手动模式")
         self.hero_phase_caption.setText(phase_text)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._apply_responsive_layouts()
+
+    def _apply_responsive_layouts(self) -> None:
+        width = self.width()
+        self.hero_layout.setDirection(QBoxLayout.TopToBottom if width < 980 else QBoxLayout.LeftToRight)
+        self.top_area_layout.setDirection(QBoxLayout.TopToBottom if width < 1080 else QBoxLayout.LeftToRight)
 
     def _refresh_elapsed_time(self) -> None:
         if self.started_at is None:

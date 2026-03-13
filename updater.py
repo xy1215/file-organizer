@@ -27,6 +27,12 @@ class UpdateInfo:
     changelog: str
 
 
+@dataclass
+class UpdateCheckResult:
+    info: UpdateInfo | None
+    reason: str | None = None
+
+
 class UpdateCancelled(Exception):
     pass
 
@@ -38,29 +44,44 @@ def _normalize_version(value: str) -> Version:
     return Version(cleaned)
 
 
-def check_for_update(current_version: str) -> UpdateInfo | None:
+def check_for_update_status(current_version: str) -> UpdateCheckResult:
     try:
-        with urllib.request.urlopen(LATEST_RELEASE_URL, timeout=5) as response:
+        request = urllib.request.Request(
+            LATEST_RELEASE_URL,
+            headers={
+                "User-Agent": "file-organizer-updater",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError):
-        return None
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return UpdateCheckResult(info=None, reason="更新源未发布可用 Release，当前无法检查更新。")
+        if exc.code == 403:
+            return UpdateCheckResult(info=None, reason="GitHub 更新接口暂时受限，请稍后再试。")
+        return UpdateCheckResult(info=None, reason=f"更新检查失败（HTTP {exc.code}）。")
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return UpdateCheckResult(info=None, reason="无法连接更新服务器。")
+    except json.JSONDecodeError:
+        return UpdateCheckResult(info=None, reason="更新服务器返回了无法识别的数据。")
 
     tag_name = str(payload.get("tag_name") or "").strip()
     if not tag_name:
-        return None
+        return UpdateCheckResult(info=None, reason="更新源缺少版本标签信息。")
 
     try:
         latest_version = _normalize_version(tag_name)
         installed_version = _normalize_version(current_version)
     except InvalidVersion:
-        return None
+        return UpdateCheckResult(info=None, reason="版本号格式无法识别。")
 
     if latest_version <= installed_version:
-        return None
+        return UpdateCheckResult(info=None, reason=f"当前已是最新版本 v{installed_version}。")
 
     assets = payload.get("assets", [])
     if not isinstance(assets, list):
-        return None
+        return UpdateCheckResult(info=None, reason="更新源缺少可下载资源列表。")
 
     download_url = ""
     for asset in assets:
@@ -72,13 +93,19 @@ def check_for_update(current_version: str) -> UpdateInfo | None:
             break
 
     if not download_url:
-        return None
+        return UpdateCheckResult(info=None, reason="最新 Release 未附带可下载的 ZIP 安装包。")
 
-    return UpdateInfo(
-        version=str(latest_version),
-        download_url=download_url,
-        changelog=str(payload.get("body") or "").strip(),
+    return UpdateCheckResult(
+        info=UpdateInfo(
+            version=str(latest_version),
+            download_url=download_url,
+            changelog=str(payload.get("body") or "").strip(),
+        ),
     )
+
+
+def check_for_update(current_version: str) -> UpdateInfo | None:
+    return check_for_update_status(current_version).info
 
 
 def download_update(
