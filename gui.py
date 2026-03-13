@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 from PySide6.QtCore import QThread, Qt, QTimer, Signal, QUrl
-from PySide6.QtGui import QDesktopServices, QTextCursor
+from PySide6.QtGui import QAction, QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -269,6 +269,7 @@ class MainWindow(QMainWindow):
         self.update_download_worker: UpdateDownloadWorker | None = None
         self.available_update: UpdateInfo | None = None
         self.ignored_update_version: str | None = None
+        self._manual_update_check_pending = False
         self.update_progress_dialog: QProgressDialog | None = None
         self.current_total = 0
         self.current_progress = 0
@@ -281,6 +282,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"文件整理助手 v{__version__}")
         self.resize(1100, 760)
+        self._setup_menu_bar()
 
         central = QWidget()
         root = QVBoxLayout(central)
@@ -303,6 +305,17 @@ class MainWindow(QMainWindow):
         self.current_command: list[str] = []
         self._update_run_buttons()
         self._start_update_check()
+
+    def _setup_menu_bar(self) -> None:
+        help_menu = self.menuBar().addMenu("帮助")
+
+        version_action = QAction(f"当前版本 v{__version__}", self)
+        version_action.setEnabled(False)
+        help_menu.addAction(version_action)
+
+        check_update_action = QAction("检查更新", self)
+        check_update_action.triggered.connect(self._check_for_updates_manually)
+        help_menu.addAction(check_update_action)
 
     def _build_update_banner(self) -> QFrame:
         self.update_banner = QFrame()
@@ -660,19 +673,48 @@ class MainWindow(QMainWindow):
             button.setEnabled(enabled)
         self.cancel_button.setEnabled(running)
 
-    def _start_update_check(self) -> None:
+    def _start_update_check(self, *, manual: bool = False) -> None:
+        if self.update_check_worker and self.update_check_worker.isRunning():
+            if manual:
+                QMessageBox.information(self, "正在检查更新", "当前已经在检查更新，请稍候。")
+            return
+        self._manual_update_check_pending = manual
         self.update_check_worker = UpdateCheckWorker(self)
         self.update_check_worker.checked.connect(self._on_update_check_finished)
         self.update_check_worker.start()
 
+    def _check_for_updates_manually(self) -> None:
+        self._start_update_check(manual=True)
+
     def _on_update_check_finished(self, update_info: object) -> None:
+        manual = self._manual_update_check_pending
+        self._manual_update_check_pending = False
+        self.update_check_worker = None
         if not isinstance(update_info, UpdateInfo):
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "检查更新",
+                    "当前未发现可用更新，或暂时无法连接更新服务器。",
+                )
             return
         if self.ignored_update_version == update_info.version:
+            if manual:
+                QMessageBox.information(
+                    self,
+                    "检查更新",
+                    f"发现新版本 v{update_info.version}，但已在本次启动中忽略。你仍可点击顶部提示条继续更新。",
+                )
             return
         self.available_update = update_info
         self.update_label.setText(f"发现新版本 v{update_info.version}，点击更新")
         self.update_banner.show()
+        if manual:
+            QMessageBox.information(
+                self,
+                "检查更新",
+                f"发现新版本 v{update_info.version}，可通过顶部提示条立即更新。",
+            )
 
     def _ignore_current_update(self) -> None:
         if self.available_update is not None:
