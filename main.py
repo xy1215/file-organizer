@@ -13,6 +13,9 @@ import yaml
 from rich.console import Console
 
 from app_paths import app_path
+from numpy_compat import ensure_numpy_legacy_aliases
+ensure_numpy_legacy_aliases()
+
 from cache import CacheDB
 from classifier import LLMClient, build_file_stub, classify_files_iter, summarize_text
 from common import OperationCancelled, ensure_dict, ensure_str_list
