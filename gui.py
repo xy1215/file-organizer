@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QRadioButton,
     QSpinBox,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -282,20 +283,16 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(f"文件整理助手 v{__version__}")
         self.resize(1100, 760)
+        self._apply_theme()
         self._setup_menu_bar()
 
         central = QWidget()
+        central.setObjectName("centralSurface")
         root = QVBoxLayout(central)
-        root.setContentsMargins(18, 18, 18, 18)
-        root.setSpacing(14)
+        root.setContentsMargins(24, 22, 24, 24)
+        root.setSpacing(16)
 
-        title = QLabel("本地文件整理与摘要工具")
-        title.setStyleSheet("font-size: 24px; font-weight: 700;")
-        subtitle = QLabel("面向电脑小白的桌面界面。先配置，再点击按钮执行扫描、摘要和报告。")
-        subtitle.setStyleSheet("color: #586271;")
-
-        root.addWidget(title)
-        root.addWidget(subtitle)
+        root.addWidget(self._build_hero_section())
         root.addWidget(self._build_update_banner())
         root.addLayout(self._build_top_area())
         root.addWidget(self._build_log_area(), stretch=1)
@@ -304,7 +301,208 @@ class MainWindow(QMainWindow):
         self._load_into_form(load_config())
         self.current_command: list[str] = []
         self._update_run_buttons()
+        self._refresh_status_badges()
         self._start_update_check()
+
+    def _apply_theme(self) -> None:
+        self.setStyleSheet(
+            """
+            QMainWindow {
+                background: #f5efe6;
+            }
+            QWidget#centralSurface {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #f8f2ea, stop:0.55 #f4eee5, stop:1 #efe6db);
+            }
+            QMenuBar {
+                background: rgba(255, 255, 255, 0.72);
+                color: #433129;
+                border: 1px solid rgba(125, 86, 55, 0.18);
+                border-radius: 10px;
+                padding: 6px 10px;
+                spacing: 10px;
+            }
+            QMenuBar::item {
+                padding: 6px 10px;
+                border-radius: 8px;
+                background: transparent;
+            }
+            QMenuBar::item:selected {
+                background: #ead9c9;
+            }
+            QMenu {
+                background: #fffaf5;
+                border: 1px solid #d9c5b3;
+                padding: 8px;
+            }
+            QMenu::item {
+                padding: 8px 14px;
+                border-radius: 8px;
+            }
+            QMenu::item:selected {
+                background: #f0dfcf;
+            }
+            QFrame#heroCard, QFrame#statusCard, QFrame#updateBanner {
+                background: rgba(255, 251, 246, 0.92);
+                border: 1px solid rgba(130, 93, 67, 0.16);
+                border-radius: 18px;
+            }
+            QFrame#heroCard {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #fff7ef, stop:0.6 #f3e4d4, stop:1 #e9d7c3);
+            }
+            QLabel#eyebrow {
+                color: #8b5e3c;
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 1px;
+                text-transform: uppercase;
+            }
+            QLabel#heroTitle {
+                color: #2d211c;
+                font-size: 30px;
+                font-weight: 800;
+            }
+            QLabel#heroSubtitle {
+                color: #6c584d;
+                font-size: 14px;
+                line-height: 1.4;
+            }
+            QLabel#heroBadge {
+                background: rgba(255, 250, 244, 0.88);
+                border: 1px solid rgba(109, 74, 48, 0.14);
+                border-radius: 14px;
+                color: #5a4337;
+                font-weight: 600;
+                padding: 8px 12px;
+            }
+            QGroupBox {
+                color: #3f2f27;
+                font-size: 15px;
+                font-weight: 700;
+                background: rgba(255, 251, 246, 0.9);
+                border: 1px solid rgba(130, 93, 67, 0.16);
+                border-radius: 18px;
+                margin-top: 14px;
+                padding-top: 18px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 16px;
+                padding: 0 8px;
+                color: #7b5439;
+            }
+            QLabel {
+                color: #3f2f27;
+            }
+            QLabel#mutedLabel {
+                color: #6e5c51;
+            }
+            QLabel#statusValue {
+                color: #2a201c;
+                font-size: 18px;
+                font-weight: 800;
+            }
+            QLabel#statusCaption {
+                color: #7a6658;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QLineEdit, QPlainTextEdit, QListWidget, QSpinBox {
+                background: rgba(255, 255, 255, 0.82);
+                border: 1px solid #d9c7b6;
+                border-radius: 12px;
+                padding: 8px 10px;
+                color: #2e241f;
+                selection-background-color: #c57f45;
+            }
+            QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus, QSpinBox:focus {
+                border: 1px solid #bb6f33;
+                background: #fffdfb;
+            }
+            QListWidget {
+                padding: 6px;
+            }
+            QListWidget::item {
+                border-radius: 8px;
+                padding: 7px 8px;
+                margin: 2px 0;
+            }
+            QListWidget::item:selected {
+                background: #f0dfcf;
+                color: #2e241f;
+            }
+            QPushButton {
+                background: #efe0d1;
+                color: #452f24;
+                border: 1px solid rgba(129, 88, 58, 0.18);
+                border-radius: 12px;
+                padding: 10px 14px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #e8d5c3;
+            }
+            QPushButton:pressed {
+                background: #dec4ac;
+            }
+            QPushButton:disabled {
+                background: #e8ddd2;
+                color: #a08e81;
+                border-color: rgba(129, 88, 58, 0.1);
+            }
+            QPushButton[role="primary"] {
+                background: #b7652f;
+                color: #fffaf5;
+                border: none;
+            }
+            QPushButton[role="primary"]:hover {
+                background: #a85a28;
+            }
+            QPushButton[role="primary"]:pressed {
+                background: #954d1f;
+            }
+            QPushButton[role="accent"] {
+                background: #2f6c63;
+                color: #f4fbf8;
+                border: none;
+            }
+            QPushButton[role="accent"]:hover {
+                background: #285c55;
+            }
+            QPushButton[role="danger"] {
+                background: #a84c4c;
+                color: #fff8f6;
+                border: none;
+            }
+            QPushButton[role="danger"]:hover {
+                background: #963f3f;
+            }
+            QCheckBox, QRadioButton {
+                color: #4a3931;
+                spacing: 8px;
+            }
+            QProgressBar {
+                min-height: 16px;
+                border-radius: 8px;
+                background: #eadccd;
+                border: none;
+                text-align: center;
+                color: #4a3931;
+                font-weight: 700;
+            }
+            QProgressBar::chunk {
+                border-radius: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #b8662f, stop:1 #d49a59);
+            }
+            QPlainTextEdit {
+                background: #fffdf9;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 12px;
+            }
+            """
+        )
 
     def _setup_menu_bar(self) -> None:
         help_menu = self.menuBar().addMenu("帮助")
@@ -317,15 +515,83 @@ class MainWindow(QMainWindow):
         check_update_action.triggered.connect(self._check_for_updates_manually)
         help_menu.addAction(check_update_action)
 
+    def _build_hero_section(self) -> QFrame:
+        card = QFrame()
+        card.setObjectName("heroCard")
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(22, 18, 22, 18)
+        layout.setSpacing(18)
+
+        text_column = QVBoxLayout()
+        text_column.setSpacing(6)
+
+        eyebrow = QLabel("Desktop Organizer")
+        eyebrow.setObjectName("eyebrow")
+        title = QLabel("文件整理助手")
+        title.setObjectName("heroTitle")
+        subtitle = QLabel("把扫描、分类、摘要和报告放在一个桌面工作台里。先配置，再开始巡检。")
+        subtitle.setObjectName("heroSubtitle")
+        subtitle.setWordWrap(True)
+
+        badge_row = QHBoxLayout()
+        badge_row.setSpacing(10)
+        for text in [f"v{__version__}", "本地优先", "HTML 报告"]:
+            badge = QLabel(text)
+            badge.setObjectName("heroBadge")
+            badge_row.addWidget(badge)
+        badge_row.addStretch(1)
+
+        text_column.addWidget(eyebrow)
+        text_column.addWidget(title)
+        text_column.addWidget(subtitle)
+        text_column.addLayout(badge_row)
+
+        summary_column = QVBoxLayout()
+        summary_column.setSpacing(10)
+        summary_column.addWidget(self._make_status_tile("当前状态", "空闲", "准备开始"), stretch=1)
+        summary_column.addWidget(self._make_status_tile("最近动作", "等待中", "尚未开始任务"), stretch=1)
+
+        layout.addLayout(text_column, stretch=3)
+        layout.addLayout(summary_column, stretch=2)
+        return card
+
+    def _make_status_tile(self, title: str, value: str, caption: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("statusCard")
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(4)
+
+        heading = QLabel(title)
+        heading.setObjectName("statusCaption")
+        heading.setProperty("class", "caption")
+        value_label = QLabel(value)
+        value_label.setObjectName("statusValue")
+        caption_label = QLabel(caption)
+        caption_label.setObjectName("statusCaption")
+
+        layout.addWidget(heading)
+        layout.addWidget(value_label)
+        layout.addWidget(caption_label)
+
+        if title == "当前状态":
+            self.hero_status_value = value_label
+            self.hero_status_caption = caption_label
+        else:
+            self.hero_phase_value = value_label
+            self.hero_phase_caption = caption_label
+        return card
+
     def _build_update_banner(self) -> QFrame:
         self.update_banner = QFrame()
-        self.update_banner.setStyleSheet(
-            "QFrame { background: #f0f6ff; border: 1px solid #b3cffc; border-radius: 12px; }"
-        )
+        self.update_banner.setObjectName("updateBanner")
         layout = QHBoxLayout(self.update_banner)
-        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setContentsMargins(18, 12, 18, 12)
         self.update_label = QLabel("发现新版本")
+        self.update_label.setStyleSheet("font-weight: 700; color: #214e67;")
         self.update_now_button = QPushButton("立即更新")
+        self.update_now_button.setProperty("role", "primary")
         self.update_now_button.clicked.connect(self._handle_update_now)
         self.update_ignore_button = QPushButton("忽略")
         self.update_ignore_button.clicked.connect(self._ignore_current_update)
@@ -345,14 +611,21 @@ class MainWindow(QMainWindow):
     def _build_config_panel(self) -> QGroupBox:
         box = QGroupBox("配置")
         layout = QVBoxLayout(box)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
         form = QFormLayout()
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self.provider_input = QLineEdit()
+        self.provider_input.setPlaceholderText("openai / anthropic")
         self.api_key_input = QLineEdit()
         self.api_key_input.setEchoMode(QLineEdit.Password)
+        self.api_key_input.setPlaceholderText("优先读取环境变量，也可直接填写")
         self.model_input = QLineEdit()
         self.summary_model_input = QLineEdit()
         self.base_url_input = QLineEdit()
+        self.base_url_input.setPlaceholderText("留空使用官方 API 地址")
         self.batch_size_input = QSpinBox()
         self.batch_size_input.setRange(10, 100)
         self.classification_workers_input = QSpinBox()
@@ -396,11 +669,17 @@ class MainWindow(QMainWindow):
         self.exclude_input.setFixedHeight(120)
 
         save_button = QPushButton("保存配置")
+        save_button.setProperty("role", "primary")
         save_button.clicked.connect(self._save_form_config)
 
+        helper = QLabel("建议先确认模型与扫描范围，再开始巡检。默认目录可单独勾选或取消。")
+        helper.setObjectName("mutedLabel")
+        helper.setWordWrap(True)
+        layout.addWidget(helper)
         layout.addWidget(QLabel("额外扫描目录"))
         default_path_box = QGroupBox("默认扫描目录")
         default_path_layout = QVBoxLayout(default_path_box)
+        default_path_layout.setContentsMargins(14, 16, 14, 12)
         self.scan_desktop_checkbox = QCheckBox("Desktop")
         self.scan_documents_checkbox = QCheckBox("Documents")
         self.scan_downloads_checkbox = QCheckBox("Downloads")
@@ -420,21 +699,26 @@ class MainWindow(QMainWindow):
     def _build_action_panel(self) -> QGroupBox:
         box = QGroupBox("操作")
         layout = QVBoxLayout(box)
+        layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(10)
 
         self.scan_button = QPushButton("开始扫描并分类")
+        self.scan_button.setProperty("role", "primary")
         self.scan_button.clicked.connect(lambda: self._run_command(["scan"]))
         self.force_scan_button = QPushButton("强制重新扫描")
         self.force_scan_button.clicked.connect(lambda: self._run_command(["scan", "--force"]))
         self.report_button = QPushButton("刷新报告")
         self.report_button.clicked.connect(lambda: self._run_command(["report"]))
         self.open_report_button = QPushButton("打开 HTML 报告")
+        self.open_report_button.setProperty("role", "accent")
         self.open_report_button.clicked.connect(self._open_report)
         self.stats_button = QPushButton("查看缓存统计")
         self.stats_button.clicked.connect(lambda: self._run_command(["stats"]))
         self.sync_button = QPushButton("增量巡检并刷新报告")
+        self.sync_button.setProperty("role", "accent")
         self.sync_button.clicked.connect(lambda: self._run_command(["sync"]))
         self.cancel_button = QPushButton("取消当前任务")
+        self.cancel_button.setProperty("role", "danger")
         self.cancel_button.clicked.connect(self._cancel_running_task)
         self.cancel_button.setEnabled(False)
 
@@ -457,6 +741,7 @@ class MainWindow(QMainWindow):
         self.summary_category_input.setPlaceholderText("输入分类名称，例如 财务/税务")
 
         self.run_summary_button = QPushButton("生成摘要")
+        self.run_summary_button.setProperty("role", "primary")
         self.run_summary_button.clicked.connect(self._run_summary_command)
 
         summarize_layout.addWidget(self.summary_file_radio)
@@ -480,14 +765,20 @@ class MainWindow(QMainWindow):
     def _build_log_area(self) -> QGroupBox:
         box = QGroupBox("运行日志")
         layout = QVBoxLayout(box)
-        self.status_label = QLabel("空闲")
-        self.status_label.setStyleSheet("font-weight: 600;")
-        self.phase_label = QLabel("等待开始")
-        self.phase_label.setStyleSheet("color: #586271;")
-        self.elapsed_label = QLabel("耗时：00:00")
-        self.elapsed_label.setStyleSheet("color: #586271;")
-        self.progress_detail_label = QLabel("进度：未开始")
-        self.progress_detail_label.setStyleSheet("color: #586271;")
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        status_row = QHBoxLayout()
+        status_row.setSpacing(10)
+        self.status_label = self._make_metric_card("状态", "空闲")
+        self.phase_label = self._make_metric_card("阶段", "等待开始")
+        self.elapsed_label = self._make_metric_card("耗时", "00:00")
+        self.progress_detail_label = self._make_metric_card("进度", "未开始")
+        status_row.addWidget(self.status_label)
+        status_row.addWidget(self.phase_label)
+        status_row.addWidget(self.elapsed_label)
+        status_row.addWidget(self.progress_detail_label)
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 1)
         self.progress_bar.setValue(0)
@@ -498,14 +789,18 @@ class MainWindow(QMainWindow):
         clear_button = QPushButton("清空日志")
         clear_button.clicked.connect(self.log_output.clear)
 
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.phase_label)
-        layout.addWidget(self.elapsed_label)
-        layout.addWidget(self.progress_detail_label)
+        layout.addLayout(status_row)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.log_output, stretch=1)
         layout.addWidget(clear_button, alignment=Qt.AlignRight)
         return box
+
+    def _make_metric_card(self, title: str, value: str) -> QLabel:
+        label = QLabel(f"{title}\n{value}")
+        label.setObjectName("heroBadge")
+        label.setMinimumHeight(68)
+        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        return label
 
     def _load_into_form(self, config: dict[str, Any]) -> None:
         llm = ensure_dict(config.get("llm", {}))
@@ -625,14 +920,15 @@ class MainWindow(QMainWindow):
         self.current_progress = 0
         self.started_at = time.monotonic()
         self.log_output.clear()
-        self.status_label.setText(f"运行中：{' '.join(args)}")
-        self.phase_label.setText("任务已启动，正在准备...")
-        self.elapsed_label.setText("耗时：00:00")
-        self.progress_detail_label.setText("进度：准备中")
+        self.status_label.setText(f"状态\n运行中：{' '.join(args)}")
+        self.phase_label.setText("阶段\n任务已启动")
+        self.elapsed_label.setText("耗时\n00:00")
+        self.progress_detail_label.setText("进度\n准备中")
         self._set_busy_progress()
         self.elapsed_timer.start()
         self._append_log(f"开始执行：{' '.join(args)}")
         self._update_run_buttons(running=True)
+        self._refresh_status_badges()
 
         self.worker = CommandWorker(args=args)
         self.worker.log.connect(self._append_log)
@@ -643,13 +939,13 @@ class MainWindow(QMainWindow):
     def _on_worker_finished(self, success: bool, message: str, cancelled: bool) -> None:
         self.elapsed_timer.stop()
         self._refresh_elapsed_time()
-        self.status_label.setText("已完成" if success else ("已取消" if cancelled else "执行失败"))
-        self.phase_label.setText("任务完成" if success else ("任务已取消" if cancelled else "任务失败"))
+        self.status_label.setText("状态\n" + ("已完成" if success else ("已取消" if cancelled else "执行失败")))
+        self.phase_label.setText("阶段\n" + ("任务完成" if success else ("任务已取消" if cancelled else "任务失败")))
         if self.current_total:
             final_progress = self.current_total if success else self.current_progress
-            self.progress_detail_label.setText(f"进度：{final_progress}/{self.current_total}")
+            self.progress_detail_label.setText(f"进度\n{final_progress}/{self.current_total}")
         else:
-            self.progress_detail_label.setText("进度：已完成" if success else ("进度：已取消" if cancelled else "进度：已中断"))
+            self.progress_detail_label.setText("进度\n" + ("已完成" if success else ("已取消" if cancelled else "已中断")))
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100 if success else 0)
         self.progress_bar.setFormat("完成" if success else ("已取消" if cancelled else "失败"))
@@ -658,6 +954,7 @@ class MainWindow(QMainWindow):
         elif success:
             self._append_log("任务执行完成。")
         self._update_run_buttons(running=False)
+        self._refresh_status_badges()
         self.worker = None
 
     def _update_run_buttons(self, running: bool = False) -> None:
@@ -709,6 +1006,7 @@ class MainWindow(QMainWindow):
         self.available_update = update_info
         self.update_label.setText(f"发现新版本 v{update_info.version}，点击更新")
         self.update_banner.show()
+        self._refresh_status_badges()
         if manual:
             QMessageBox.information(
                 self,
@@ -720,6 +1018,7 @@ class MainWindow(QMainWindow):
         if self.available_update is not None:
             self.ignored_update_version = self.available_update.version
         self.update_banner.hide()
+        self._refresh_status_badges()
 
     def _handle_update_now(self) -> None:
         if self.available_update is None:
@@ -787,8 +1086,9 @@ class MainWindow(QMainWindow):
             return
         self.worker.cancel()
         self._append_log("已请求取消当前任务，正在等待当前步骤安全结束...")
-        self.phase_label.setText("正在取消任务...")
+        self.phase_label.setText("阶段\n正在取消任务")
         self.cancel_button.setEnabled(False)
+        self._refresh_status_badges()
 
     def _open_report(self) -> None:
         if not REPORT_PATH.exists():
@@ -817,8 +1117,9 @@ class MainWindow(QMainWindow):
 
     def _apply_progress_update(self, phase: str, current: int, total: int, detail: str) -> None:
         if phase == "scan":
-            self.phase_label.setText(detail or "正在扫描目录...")
+            self.phase_label.setText("阶段\n" + (detail or "正在扫描目录..."))
             self._set_busy_progress()
+            self._refresh_status_badges()
             return
         if phase == "classify":
             self.current_progress = current
@@ -827,8 +1128,9 @@ class MainWindow(QMainWindow):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(value)
             self.progress_bar.setFormat(f"{current}/{total}")
-            self.progress_detail_label.setText(f"进度：{current}/{total}")
-            self.phase_label.setText(detail or "正在调用模型进行分类...")
+            self.progress_detail_label.setText(f"进度\n{current}/{total}")
+            self.phase_label.setText("阶段\n" + (detail or "正在调用模型进行分类..."))
+            self._refresh_status_badges()
             return
         if phase == "summarize":
             self.current_progress = current
@@ -837,38 +1139,52 @@ class MainWindow(QMainWindow):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(value)
             self.progress_bar.setFormat(f"{current}/{total}")
-            self.progress_detail_label.setText(f"进度：{current}/{total}")
-            self.phase_label.setText(detail or "正在生成摘要...")
+            self.progress_detail_label.setText(f"进度\n{current}/{total}")
+            self.phase_label.setText("阶段\n" + (detail or "正在生成摘要..."))
+            self._refresh_status_badges()
             return
         if phase == "report":
-            self.phase_label.setText(detail or "正在生成报告...")
+            self.phase_label.setText("阶段\n" + (detail or "正在生成报告..."))
             self._set_busy_progress()
+            self._refresh_status_badges()
             return
         if phase == "stats":
-            self.phase_label.setText(detail or "正在读取缓存统计...")
+            self.phase_label.setText("阶段\n" + (detail or "正在读取缓存统计..."))
             self._set_busy_progress()
+            self._refresh_status_badges()
             return
         if phase == "done":
-            self.phase_label.setText(detail or "任务完成")
+            self.phase_label.setText("阶段\n" + (detail or "任务完成"))
+            self._refresh_status_badges()
+
+    def _refresh_status_badges(self) -> None:
+        status_text = self.status_label.text().split("\n", 1)[-1] if "\n" in self.status_label.text() else self.status_label.text()
+        phase_text = self.phase_label.text().split("\n", 1)[-1] if "\n" in self.phase_label.text() else self.phase_label.text()
+        self.hero_status_value.setText(status_text)
+        self.hero_status_caption.setText("有新版本可用" if self.update_banner.isVisible() else "当前未挂起更新")
+        self.hero_phase_value.setText("自动巡检开启" if self.auto_scan_checkbox.isChecked() else "手动模式")
+        self.hero_phase_caption.setText(phase_text)
 
     def _refresh_elapsed_time(self) -> None:
         if self.started_at is None:
-            self.elapsed_label.setText("耗时：00:00")
+            self.elapsed_label.setText("耗时\n00:00")
             return
         seconds = max(0, int(time.monotonic() - self.started_at))
         minutes, remaining = divmod(seconds, 60)
         hours, minutes = divmod(minutes, 60)
         if hours:
-            self.elapsed_label.setText(f"耗时：{hours:02d}:{minutes:02d}:{remaining:02d}")
+            self.elapsed_label.setText(f"耗时\n{hours:02d}:{minutes:02d}:{remaining:02d}")
             return
-        self.elapsed_label.setText(f"耗时：{minutes:02d}:{remaining:02d}")
+        self.elapsed_label.setText(f"耗时\n{minutes:02d}:{remaining:02d}")
 
     def _sync_auto_scan_timer(self) -> None:
         if not self.auto_scan_checkbox.isChecked():
             self.auto_scan_timer.stop()
+            self._refresh_status_badges()
             return
         interval_ms = self.auto_scan_interval_input.value() * 60 * 1000
         self.auto_scan_timer.start(interval_ms)
+        self._refresh_status_badges()
 
     def _trigger_auto_sync(self) -> None:
         if self.worker and self.worker.isRunning():
