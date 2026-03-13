@@ -20,6 +20,11 @@ SUPPORTED_EXTENSIONS = {
 }
 
 DEFAULT_SCAN_DIRS = ["Desktop", "Documents", "Downloads"]
+DEFAULT_SCAN_KEY_MAP = {
+    "desktop": "Desktop",
+    "documents": "Documents",
+    "downloads": "Downloads",
+}
 
 
 @dataclass
@@ -35,10 +40,25 @@ def get_default_paths() -> list[Path]:
     return [home / folder for folder in DEFAULT_SCAN_DIRS]
 
 
-def normalize_scan_paths(extra_paths: list[str] | None = None) -> list[Path]:
+def get_enabled_default_paths(default_path_flags: dict[str, bool] | None = None) -> list[Path]:
+    home = Path.home()
+    if default_path_flags is None:
+        return [home / folder for folder in DEFAULT_SCAN_DIRS]
+
+    enabled: list[Path] = []
+    for key, folder in DEFAULT_SCAN_KEY_MAP.items():
+        if bool(default_path_flags.get(key, True)):
+            enabled.append(home / folder)
+    return enabled
+
+
+def normalize_scan_paths(
+    extra_paths: list[str] | None = None,
+    default_path_flags: dict[str, bool] | None = None,
+) -> list[Path]:
     normalized: list[Path] = []
     seen: set[str] = set()
-    for path in [*get_default_paths(), *(Path(item) for item in (extra_paths or []))]:
+    for path in [*get_enabled_default_paths(default_path_flags), *(Path(item) for item in (extra_paths or []))]:
         expanded = path.expanduser()
         try:
             resolved = expanded.resolve(strict=False)
@@ -84,7 +104,11 @@ def is_valid_file(path: Path, file_size: int) -> bool:
     return True
 
 
-def scan_files(paths: list[str] | None = None, exclude_patterns: list[str] | None = None) -> list[ScannedFile]:
+def scan_files(
+    paths: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
+    default_path_flags: dict[str, bool] | None = None,
+) -> list[ScannedFile]:
     exclude_set = {
         str(pattern).strip().lower()
         for pattern in (exclude_patterns or [])
@@ -92,7 +116,7 @@ def scan_files(paths: list[str] | None = None, exclude_patterns: list[str] | Non
     }
     scanned: list[ScannedFile] = []
     seen_files: set[str] = set()
-    for root in compact_scan_roots(normalize_scan_paths(paths)):
+    for root in compact_scan_roots(normalize_scan_paths(paths, default_path_flags=default_path_flags)):
         if not root.exists():
             continue
         for current_root, dirnames, filenames in os.walk(root):

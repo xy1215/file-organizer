@@ -8,6 +8,10 @@ llm:
 
 # 扫描配置
 scan:
+  default_paths:
+    desktop: true
+    documents: true
+    downloads: true
   paths: []
   exclude_patterns:
     - "node_modules"

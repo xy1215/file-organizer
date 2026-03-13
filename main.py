@@ -185,9 +185,15 @@ def _scan_and_classify(
     _log("[cyan]正在扫描目录，请稍候...[/cyan]", hooks)
     _progress("scan", 0, 0, "正在扫描目录...", hooks)
     scan_config = ensure_dict(config.get("scan", {}))
+    default_paths_config = ensure_dict(scan_config.get("default_paths", {}))
     scanned_files = scan_files(
         paths=ensure_str_list(scan_config.get("paths", [])),
         exclude_patterns=ensure_str_list(scan_config.get("exclude_patterns", [])),
+        default_path_flags={
+            "desktop": bool(default_paths_config.get("desktop", True)),
+            "documents": bool(default_paths_config.get("documents", True)),
+            "downloads": bool(default_paths_config.get("downloads", True)),
+        },
     )
     if not scanned_files:
         _log("[yellow]没有扫描到符合条件的文件。[/yellow]", hooks)

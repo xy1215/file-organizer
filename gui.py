@@ -52,6 +52,11 @@ def default_config() -> dict[str, Any]:
             "base_url": "",
         },
         "scan": {
+            "default_paths": {
+                "desktop": True,
+                "documents": True,
+                "downloads": True,
+            },
             "paths": [],
             "exclude_patterns": ["node_modules", ".git", "__pycache__", "AppData"],
         },
@@ -81,6 +86,7 @@ def load_config() -> dict[str, Any]:
 
     llm = ensure_dict(loaded.get("llm", {}))
     scan = ensure_dict(loaded.get("scan", {}))
+    default_paths = ensure_dict(scan.get("default_paths", {}))
     automation = ensure_dict(loaded.get("automation", {}))
 
     config["llm"].update(
@@ -95,6 +101,11 @@ def load_config() -> dict[str, Any]:
     )
     config["scan"].update(
         {
+            "default_paths": {
+                "desktop": bool(default_paths.get("desktop", config["scan"]["default_paths"]["desktop"])),
+                "documents": bool(default_paths.get("documents", config["scan"]["default_paths"]["documents"])),
+                "downloads": bool(default_paths.get("downloads", config["scan"]["default_paths"]["downloads"])),
+            },
             "paths": ensure_str_list(scan.get("paths", [])),
             "exclude_patterns": ensure_str_list(scan.get("exclude_patterns", [])),
         }
@@ -310,6 +321,18 @@ class MainWindow(QMainWindow):
         save_button.clicked.connect(self._save_form_config)
 
         layout.addWidget(QLabel("额外扫描目录"))
+        default_path_box = QGroupBox("默认扫描目录")
+        default_path_layout = QVBoxLayout(default_path_box)
+        self.scan_desktop_checkbox = QCheckBox("Desktop")
+        self.scan_documents_checkbox = QCheckBox("Documents")
+        self.scan_downloads_checkbox = QCheckBox("Downloads")
+        self.scan_desktop_checkbox.setChecked(True)
+        self.scan_documents_checkbox.setChecked(True)
+        self.scan_downloads_checkbox.setChecked(True)
+        default_path_layout.addWidget(self.scan_desktop_checkbox)
+        default_path_layout.addWidget(self.scan_documents_checkbox)
+        default_path_layout.addWidget(self.scan_downloads_checkbox)
+        layout.addWidget(default_path_box)
         layout.addLayout(path_row)
         layout.addWidget(QLabel("排除目录名"))
         layout.addWidget(self.exclude_input)
@@ -409,6 +432,7 @@ class MainWindow(QMainWindow):
     def _load_into_form(self, config: dict[str, Any]) -> None:
         llm = ensure_dict(config.get("llm", {}))
         scan = ensure_dict(config.get("scan", {}))
+        default_paths = ensure_dict(scan.get("default_paths", {}))
         automation = ensure_dict(config.get("automation", {}))
         self.provider_input.setText(str(llm.get("provider", "openai")))
         self.api_key_input.setText(str(llm.get("api_key", "")))
@@ -424,6 +448,9 @@ class MainWindow(QMainWindow):
         self.auto_scan_interval_input.setValue(
             normalize_auto_scan_interval(automation.get("interval_minutes", 60))
         )
+        self.scan_desktop_checkbox.setChecked(bool(default_paths.get("desktop", True)))
+        self.scan_documents_checkbox.setChecked(bool(default_paths.get("documents", True)))
+        self.scan_downloads_checkbox.setChecked(bool(default_paths.get("downloads", True)))
 
         self.path_list.clear()
         for path in ensure_str_list(scan.get("paths", [])):
@@ -441,6 +468,11 @@ class MainWindow(QMainWindow):
                 "base_url": self.base_url_input.text().strip(),
             },
             "scan": {
+                "default_paths": {
+                    "desktop": self.scan_desktop_checkbox.isChecked(),
+                    "documents": self.scan_documents_checkbox.isChecked(),
+                    "downloads": self.scan_downloads_checkbox.isChecked(),
+                },
                 "paths": [self.path_list.item(i).text() for i in range(self.path_list.count())],
                 "exclude_patterns": [
                     line.strip()

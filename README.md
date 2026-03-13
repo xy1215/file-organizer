@@ -53,6 +53,10 @@ llm:
   base_url: ""
 
 scan:
+  default_paths:
+    desktop: true
+    documents: true
+    downloads: true
   paths:
     - "D:/工作文件"
     - "E:/资料"
@@ -73,7 +77,8 @@ summary_workers: 4
 - `api_key` 也可以不写在配置里，改用环境变量 `LLM_API_KEY`
 - `model` 用于分类
 - `summary_model` 用于摘要
-- `paths` 是额外扫描目录，默认的桌面、文档、下载始终会扫描
+- `default_paths` 控制是否扫描默认的 `Desktop`、`Documents`、`Downloads`
+- `paths` 是额外扫描目录，会和勾选启用的默认目录一起扫描
 - `batch_size` 建议从 10-30 起步，路径很长或使用兼容后端时更稳妥
 - `classification_workers` 控制分类并发请求数（1-4），默认 2
 - `summary_workers` 控制摘要并发请求数（1-8），默认 4
