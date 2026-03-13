@@ -3,6 +3,7 @@ click
 jinja2
 openai
 openpyxl
+packaging
 pymupdf
 python-docx
 python-pptx

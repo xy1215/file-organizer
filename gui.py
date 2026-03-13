@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -26,6 +27,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QProgressBar,
+    QProgressDialog,
     QPlainTextEdit,
     QRadioButton,
     QSpinBox,
@@ -33,13 +35,44 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app_paths import app_path, get_app_dir
 from common import ensure_dict, ensure_str_list
 from main import OperationCancelled, RuntimeHooks, run_report, run_scan, run_stats, run_summarize
 from main import run_sync
+from updater import UpdateInfo, apply_update, check_for_update, download_update, make_download_dir
+from version import __version__
 
 
-CONFIG_PATH = Path("config.yaml")
-REPORT_PATH = Path("report.html")
+CONFIG_PATH = app_path("config.yaml")
+REPORT_PATH = app_path("report.html")
+
+
+class UpdateCheckWorker(QThread):
+    checked = Signal(object)
+
+    def run(self) -> None:
+        self.checked.emit(check_for_update(__version__))
+
+
+class UpdateDownloadWorker(QThread):
+    progress_changed = Signal(int, int)
+    finished_update = Signal(str, str)
+
+    def __init__(self, update_info: UpdateInfo, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.update_info = update_info
+
+    def run(self) -> None:
+        try:
+            zip_path = download_update(
+                self.update_info.download_url,
+                make_download_dir(),
+                on_progress=lambda current, total: self.progress_changed.emit(current, total),
+            )
+        except Exception as exc:
+            self.finished_update.emit("", str(exc))
+            return
+        self.finished_update.emit(str(zip_path), "")
 
 
 def default_config() -> dict[str, Any]:
@@ -225,6 +258,11 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.worker: CommandWorker | None = None
+        self.update_check_worker: UpdateCheckWorker | None = None
+        self.update_download_worker: UpdateDownloadWorker | None = None
+        self.available_update: UpdateInfo | None = None
+        self.ignored_update_version: str | None = None
+        self.update_progress_dialog: QProgressDialog | None = None
         self.current_total = 0
         self.current_progress = 0
         self.started_at: float | None = None
@@ -234,7 +272,7 @@ class MainWindow(QMainWindow):
         self.auto_scan_timer = QTimer(self)
         self.auto_scan_timer.timeout.connect(self._trigger_auto_sync)
 
-        self.setWindowTitle("文件整理助手")
+        self.setWindowTitle(f"文件整理助手 v{__version__}")
         self.resize(1100, 760)
 
         central = QWidget()
@@ -249,6 +287,7 @@ class MainWindow(QMainWindow):
 
         root.addWidget(title)
         root.addWidget(subtitle)
+        root.addWidget(self._build_update_banner())
         root.addLayout(self._build_top_area())
         root.addWidget(self._build_log_area(), stretch=1)
 
@@ -256,6 +295,25 @@ class MainWindow(QMainWindow):
         self._load_into_form(load_config())
         self.current_command: list[str] = []
         self._update_run_buttons()
+        self._start_update_check()
+
+    def _build_update_banner(self) -> QFrame:
+        self.update_banner = QFrame()
+        self.update_banner.setStyleSheet(
+            "QFrame { background: #f0f6ff; border: 1px solid #b3cffc; border-radius: 12px; }"
+        )
+        layout = QHBoxLayout(self.update_banner)
+        layout.setContentsMargins(14, 10, 14, 10)
+        self.update_label = QLabel("发现新版本")
+        self.update_now_button = QPushButton("立即更新")
+        self.update_now_button.clicked.connect(self._handle_update_now)
+        self.update_ignore_button = QPushButton("忽略")
+        self.update_ignore_button.clicked.connect(self._ignore_current_update)
+        layout.addWidget(self.update_label, stretch=1)
+        layout.addWidget(self.update_now_button)
+        layout.addWidget(self.update_ignore_button)
+        self.update_banner.hide()
+        return self.update_banner
 
     def _build_top_area(self) -> QHBoxLayout:
         layout = QHBoxLayout()
@@ -595,6 +653,79 @@ class MainWindow(QMainWindow):
         ]:
             button.setEnabled(enabled)
         self.cancel_button.setEnabled(running)
+
+    def _start_update_check(self) -> None:
+        self.update_check_worker = UpdateCheckWorker(self)
+        self.update_check_worker.checked.connect(self._on_update_check_finished)
+        self.update_check_worker.start()
+
+    def _on_update_check_finished(self, update_info: object) -> None:
+        if not isinstance(update_info, UpdateInfo):
+            return
+        if self.ignored_update_version == update_info.version:
+            return
+        self.available_update = update_info
+        self.update_label.setText(f"发现新版本 v{update_info.version}，点击更新")
+        self.update_banner.show()
+
+    def _ignore_current_update(self) -> None:
+        if self.available_update is not None:
+            self.ignored_update_version = self.available_update.version
+        self.update_banner.hide()
+
+    def _handle_update_now(self) -> None:
+        if self.available_update is None:
+            return
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(self, "任务进行中", "请先等待当前任务完成，再执行更新。")
+            return
+
+        self.update_progress_dialog = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
+        self.update_progress_dialog.setWindowTitle("下载更新")
+        self.update_progress_dialog.setAutoClose(False)
+        self.update_progress_dialog.setAutoReset(False)
+        self.update_progress_dialog.setValue(0)
+
+        self.update_download_worker = UpdateDownloadWorker(self.available_update, self)
+        self.update_download_worker.progress_changed.connect(self._on_update_download_progress)
+        self.update_download_worker.finished_update.connect(self._on_update_download_finished)
+        self.update_progress_dialog.canceled.connect(self._on_update_download_cancel_requested)
+        self.update_download_worker.start()
+        self.update_progress_dialog.show()
+
+    def _on_update_download_progress(self, current: int, total: int) -> None:
+        if self.update_progress_dialog is None:
+            return
+        if total > 0:
+            self.update_progress_dialog.setMaximum(total)
+            self.update_progress_dialog.setValue(current)
+        else:
+            self.update_progress_dialog.setMaximum(0)
+
+    def _on_update_download_cancel_requested(self) -> None:
+        if self.update_download_worker and self.update_download_worker.isRunning():
+            self.update_progress_dialog.setLabelText("当前下载不支持中途取消，请稍候完成。")
+
+    def _on_update_download_finished(self, zip_path: str, error: str) -> None:
+        if self.update_progress_dialog is not None:
+            self.update_progress_dialog.close()
+            self.update_progress_dialog = None
+        if error:
+            QMessageBox.warning(self, "更新失败", f"下载更新失败：{error}")
+            return
+        if not zip_path:
+            return
+        reply = QMessageBox.question(
+            self,
+            "更新已下载",
+            "更新将在重启后生效，是否立即重启？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        apply_update(Path(zip_path), get_app_dir())
+        QApplication.quit()
 
     def _cancel_running_task(self) -> None:
         if not self.worker or not self.worker.isRunning():

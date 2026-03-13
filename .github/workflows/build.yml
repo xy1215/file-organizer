@@ -1,0 +1,23 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt && pip install pyinstaller
+      - run: pyinstaller file_organizer.spec
+      - name: Zip output
+        run: Compress-Archive -Path dist/文件整理助手/* -DestinationPath dist/file-organizer-windows.zip
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/file-organizer-windows.zip
+          generate_release_notes: true

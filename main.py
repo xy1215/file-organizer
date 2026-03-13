@@ -12,6 +12,7 @@ import click
 import yaml
 from rich.console import Console
 
+from app_paths import app_path
 from cache import CacheDB
 from classifier import LLMClient, build_file_stub, classify_files_iter, summarize_text
 from common import ensure_dict, ensure_str_list
@@ -21,8 +22,9 @@ from summarizer import UnsupportedSummaryError, extract_text
 
 
 console = Console()
+ERROR_LOG_PATH = app_path("error.log")
 logging.basicConfig(
-    filename="error.log",
+    filename=str(ERROR_LOG_PATH),
     level=logging.ERROR,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
@@ -68,10 +70,11 @@ def _raise_if_cancelled(hooks: RuntimeHooks | None = None) -> None:
         raise OperationCancelled()
 
 
-def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
-    path = Path(config_path)
+def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
+    path = Path(config_path) if config_path is not None else app_path("config.yaml")
     if not path.exists():
-        raise click.ClickException("未找到 config.yaml，请先检查项目目录。")
+        _log("[yellow]未找到 config.yaml，已按默认配置继续。[/yellow]")
+        return {}
     try:
         with path.open("r", encoding="utf-8") as handle:
             loaded = yaml.safe_load(handle) or {}
@@ -84,7 +87,7 @@ def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
 
 
 def get_cache() -> CacheDB:
-    return CacheDB("cache.db")
+    return CacheDB(app_path("cache.db"))
 
 
 def get_batch_size(config: dict[str, Any]) -> int:
@@ -440,7 +443,11 @@ def run_scan(force: bool = False, hooks: RuntimeHooks | None = None) -> None:
         _raise_if_cancelled(hooks)
         _log("[cyan]正在刷新报告...[/cyan]", hooks)
         _progress("report", 0, 0, "正在生成报告...", hooks)
-        generate_reports(cache.list_all())
+        generate_reports(
+            cache.list_all(),
+            html_path=str(app_path("report.html")),
+            json_path=str(app_path("report.json")),
+        )
         classified = result["classified"]
         _log(f"[green]扫描完成。总扫描 {len(result['scanned_files'])} 个文件，本次分类 {classified} 个文件。[/green]", hooks)
         _log("[green]已生成 report.html 和 report.json。[/green]", hooks)
@@ -483,7 +490,11 @@ def run_summarize(
         _raise_if_cancelled(hooks)
         _log("[cyan]摘要生成完成，正在刷新报告...[/cyan]", hooks)
         _progress("report", 0, 0, "正在生成报告...", hooks)
-        generate_reports(cache.list_all())
+        generate_reports(
+            cache.list_all(),
+            html_path=str(app_path("report.html")),
+            json_path=str(app_path("report.json")),
+        )
         _log(f"[green]摘要任务完成，成功 {success}/{total}。[/green]", hooks)
         _progress("done", 1, 1, "任务执行完成。", hooks)
     finally:
@@ -509,7 +520,11 @@ def run_sync(
         _raise_if_cancelled(hooks)
         _log("[cyan]正在刷新报告...[/cyan]", hooks)
         _progress("report", 0, 0, "正在生成报告...", hooks)
-        generate_reports(cache.list_all())
+        generate_reports(
+            cache.list_all(),
+            html_path=str(app_path("report.html")),
+            json_path=str(app_path("report.json")),
+        )
         _log(
             f"[green]同步完成。总扫描 {len(scanned_files)} 个文件，本次分类 {result['classified']} 个文件，摘要成功 {success}/{total}。[/green]"
             ,
@@ -528,7 +543,11 @@ def run_report(hooks: RuntimeHooks | None = None) -> None:
         _log("[cyan]正在生成报告...[/cyan]", hooks)
         _progress("report", 0, 0, "正在生成报告...", hooks)
         _raise_if_cancelled(hooks)
-        generate_reports(cache.list_all())
+        generate_reports(
+            cache.list_all(),
+            html_path=str(app_path("report.html")),
+            json_path=str(app_path("report.json")),
+        )
         _log("[green]报告已生成：report.html, report.json[/green]", hooks)
         _progress("done", 1, 1, "任务执行完成。", hooks)
     finally:
