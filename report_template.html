@@ -7,11 +7,6 @@
   <style>
     /* ═══════════════════════════════════════════════════
        统一色板 — 纸与墨
-       背景    Light: #f7f5f2   Dark: #1a1918
-       卡片    Light: #ffffff   Dark: #242322
-       主墨    Light: #1c1917   Dark: #e7e5e0
-       次墨    Light: #78716c   Dark: #a8a29e
-       强调    #b45309 (琥珀)
        ═══════════════════════════════════════════════════ */
     :root {
       --bg: #f7f5f2;
@@ -67,11 +62,7 @@
       margin-bottom: 12px;
       flex-wrap: wrap;
     }
-    .topbar-title {
-      font-size: 18px;
-      font-weight: 800;
-      white-space: nowrap;
-    }
+    .topbar-title { font-size: 18px; font-weight: 800; white-space: nowrap; }
     .topbar-badge {
       background: var(--accent-light);
       color: var(--accent);
@@ -92,20 +83,15 @@
       outline: none;
       transition: border-color 0.15s;
     }
-    .topbar-search:focus {
-      border-color: var(--accent);
-    }
+    .topbar-search:focus { border-color: var(--accent); }
     .theme-toggle {
       background: var(--bg);
       border: 1px solid var(--line);
       border-radius: 999px;
-      width: 36px;
-      height: 36px;
+      width: 36px; height: 36px;
       cursor: pointer;
       font-size: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      display: flex; align-items: center; justify-content: center;
       transition: background 0.15s;
       flex-shrink: 0;
     }
@@ -125,24 +111,63 @@
       padding: 14px 16px;
       box-shadow: var(--shadow);
     }
-    .metric-value {
-      font-size: 28px;
-      font-weight: 800;
-      line-height: 1;
-      margin-bottom: 4px;
-    }
-    .metric-label {
-      font-size: 12px;
-      color: var(--muted);
-      font-weight: 600;
-    }
+    .metric-value { font-size: 28px; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+    .metric-label { font-size: 12px; color: var(--muted); font-weight: 600; }
 
-    /* ── Cluster grid ──────────────────────────────── */
-    .cluster-grid {
+    /* ── Group section (大类) ──────────────────────── */
+    .group-section {
+      margin-bottom: 16px;
+    }
+    .group-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      box-shadow: var(--shadow);
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.15s;
+      border-left: 5px solid var(--line);
+    }
+    .group-header:hover { background: var(--card-hover); }
+    .group-arrow {
+      font-size: 12px;
+      color: var(--faint);
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    .group-section.collapsed .group-arrow { transform: rotate(-90deg); }
+    .group-name {
+      font-size: 17px;
+      font-weight: 800;
+      flex: 1;
+    }
+    .group-count {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: var(--accent-light);
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+    .group-sub-count {
+      font-size: 12px;
+      color: var(--faint);
+      flex-shrink: 0;
+    }
+    .group-body {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 12px;
+      gap: 10px;
+      padding: 10px 0 0 0;
     }
+    .group-section.collapsed .group-body { display: none; }
+
+    /* ── Cluster card (子类) ───────────────────────── */
     .cluster-card {
       background: var(--card);
       border: 1px solid var(--line);
@@ -158,58 +183,45 @@
       transform: translateY(-1px);
       box-shadow: 0 4px 12px rgba(28,25,23,0.08);
     }
-    .cluster-header {
-      padding: 16px 16px 12px;
-    }
+    .cluster-header { padding: 14px 14px 10px; }
     .cluster-topline {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
       gap: 8px;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
-    .cluster-name {
-      font-size: 16px;
-      font-weight: 700;
-      line-height: 1.2;
-    }
+    .cluster-name { font-size: 15px; font-weight: 700; line-height: 1.2; }
     .cluster-count {
       flex-shrink: 0;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
-      padding: 3px 8px;
+      padding: 2px 7px;
       border-radius: 999px;
       background: var(--accent-light);
       color: var(--accent);
     }
-    .cluster-meta {
-      font-size: 12px;
-      color: var(--muted);
-    }
+    .cluster-meta { font-size: 12px; color: var(--muted); }
     .cluster-body {
-      padding: 0 16px 16px;
+      padding: 0 14px 14px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
       flex: 1;
     }
     .preview-item {
       display: flex;
       gap: 10px;
       align-items: flex-start;
-      padding: 8px 10px;
+      padding: 6px 8px;
       border-radius: var(--radius-xs);
       background: var(--bg);
     }
     .icon-badge {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10px;
-      font-weight: 700;
+      width: 30px; height: 30px;
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700;
       flex-shrink: 0;
     }
     .ext-doc  { color: #2751a3; background: #e8f0fe; }
@@ -232,205 +244,97 @@
     [data-theme="dark"] .ext-other{ color: #90a4ae; background: #263238; }
     .preview-info { min-width: 0; flex: 1; }
     .preview-title {
-      font-size: 13px;
-      font-weight: 600;
-      line-height: 1.3;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      font-size: 13px; font-weight: 600; line-height: 1.3;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .preview-brief {
-      font-size: 12px;
-      color: var(--muted);
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
+      font-size: 12px; color: var(--muted);
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
     .cluster-footer {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 16px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 14px;
       border-top: 1px solid var(--line);
     }
-    .cluster-footer span {
-      font-size: 11px;
-      color: var(--faint);
-    }
+    .cluster-footer span { font-size: 11px; color: var(--faint); }
     .cluster-link {
-      border: none;
-      background: transparent;
-      color: var(--accent);
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 700;
-      padding: 4px 0;
+      border: none; background: transparent;
+      color: var(--accent); cursor: pointer;
+      font-size: 13px; font-weight: 700; padding: 4px 0;
     }
     .cluster-link:hover { text-decoration: underline; }
 
     /* ── Detail view ───────────────────────────────── */
-    .detail {
-      display: none;
-      animation: fadeIn 0.2s ease;
-    }
+    .detail { display: none; animation: fadeIn 0.2s ease; }
     .detail.active { display: block; }
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(8px); }
       to { opacity: 1; transform: translateY(0); }
     }
     .breadcrumb {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 14px;
-      font-size: 13px;
-      color: var(--muted);
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 14px; font-size: 13px; color: var(--muted);
     }
     .breadcrumb button {
-      background: none;
-      border: none;
-      cursor: pointer;
-      color: var(--accent);
-      font-weight: 600;
-      font-size: 13px;
-      padding: 0;
+      background: none; border: none; cursor: pointer;
+      color: var(--accent); font-weight: 600; font-size: 13px; padding: 0;
     }
     .breadcrumb button:hover { text-decoration: underline; }
-    .detail-head {
-      margin-bottom: 16px;
-    }
-    .detail-title {
-      font-size: 24px;
-      font-weight: 800;
-      line-height: 1.1;
-      margin-bottom: 6px;
-    }
-    .detail-subtitle {
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .detail-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+    .detail-head { margin-bottom: 16px; }
+    .detail-title { font-size: 24px; font-weight: 800; line-height: 1.1; margin-bottom: 6px; }
+    .detail-subtitle { color: var(--muted); font-size: 13px; }
+    .detail-list { display: flex; flex-direction: column; gap: 8px; }
     .detail-item {
-      display: grid;
-      grid-template-columns: 36px 1fr auto;
-      gap: 12px;
-      align-items: start;
-      padding: 14px 16px;
-      border-radius: var(--radius-sm);
-      background: var(--card);
-      border: 1px solid var(--line);
+      display: grid; grid-template-columns: 36px 1fr auto; gap: 12px;
+      align-items: start; padding: 14px 16px; border-radius: var(--radius-sm);
+      background: var(--card); border: 1px solid var(--line);
     }
     .detail-main { min-width: 0; }
-    .detail-file {
-      font-size: 14px;
-      font-weight: 700;
-      line-height: 1.3;
-      margin-bottom: 4px;
-      word-break: break-word;
-    }
+    .detail-file { font-size: 14px; font-weight: 700; line-height: 1.3; margin-bottom: 4px; word-break: break-word; }
     .detail-source {
-      display: inline-block;
-      font-size: 11px;
-      padding: 2px 6px;
-      border-radius: 4px;
-      margin-bottom: 4px;
+      display: inline-block; font-size: 11px; padding: 2px 6px;
+      border-radius: 4px; margin-bottom: 4px;
     }
-    .detail-source.has-summary {
-      color: var(--accent);
-      background: var(--accent-light);
-    }
-    .detail-source.inferred {
-      color: var(--faint);
-      background: var(--bg);
-      border: 1px dashed var(--line);
-    }
-    .detail-brief {
-      font-size: 13px;
-      color: var(--muted);
-      margin-bottom: 4px;
-      word-break: break-word;
-    }
-    .detail-meta {
-      font-size: 12px;
-      color: var(--faint);
-      word-break: break-word;
-    }
+    .detail-source.has-summary { color: var(--accent); background: var(--accent-light); }
+    .detail-source.inferred { color: var(--faint); background: var(--bg); border: 1px dashed var(--line); }
+    .detail-brief { font-size: 13px; color: var(--muted); margin-bottom: 4px; word-break: break-word; }
+    .detail-meta { font-size: 12px; color: var(--faint); word-break: break-word; }
     .detail-meta a { color: var(--muted); }
     .detail-meta a:hover { color: var(--accent); }
-    .detail-summary {
-      margin-top: 8px;
-    }
-    .detail-summary summary {
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--accent);
-      font-weight: 600;
-      user-select: none;
-    }
+    .detail-summary { margin-top: 8px; }
+    .detail-summary summary { cursor: pointer; font-size: 12px; color: var(--accent); font-weight: 600; user-select: none; }
     .detail-summary pre {
-      margin-top: 6px;
-      font-size: 12px;
-      color: var(--muted);
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-family: inherit;
-      line-height: 1.5;
+      margin-top: 6px; font-size: 12px; color: var(--muted);
+      white-space: pre-wrap; word-break: break-word; font-family: inherit; line-height: 1.5;
     }
-    .detail-size {
-      font-size: 12px;
-      color: var(--faint);
-      white-space: nowrap;
-      text-align: right;
-    }
+    .detail-size { font-size: 12px; color: var(--faint); white-space: nowrap; text-align: right; }
     .detail-load-more {
-      margin-top: 12px;
-      display: none;
-      align-items: center;
-      justify-content: space-between;
-      font-size: 12px;
-      color: var(--muted);
+      margin-top: 12px; display: none;
+      align-items: center; justify-content: space-between;
+      font-size: 12px; color: var(--muted);
     }
     .detail-load-more.active { display: flex; }
     .detail-load-more button {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      padding: 8px 16px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text);
+      background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+      padding: 8px 16px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text);
     }
     .detail-load-more button:hover { background: var(--card-hover); }
 
     /* ── Empty state ───────────────────────────────── */
     .empty-state {
-      display: none;
-      text-align: center;
-      padding: 48px 24px;
-      color: var(--muted);
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
+      display: none; text-align: center; padding: 48px 24px;
+      color: var(--muted); background: var(--card);
+      border: 1px solid var(--line); border-radius: var(--radius);
     }
     .empty-state.active { display: block; }
 
     /* ── Footer ────────────────────────────────────── */
-    .footnote {
-      margin-top: 16px;
-      font-size: 11px;
-      color: var(--faint);
-    }
+    .footnote { margin-top: 16px; font-size: 11px; color: var(--faint); }
 
     /* ── Responsive ────────────────────────────────── */
     @media (max-width: 768px) {
       .metrics { grid-template-columns: repeat(2, 1fr); }
-      .cluster-grid { grid-template-columns: 1fr; }
+      .group-body { grid-template-columns: 1fr; }
       .detail-item { grid-template-columns: 36px 1fr; }
       .detail-size { grid-column: 2; }
       .topbar { gap: 8px; }
@@ -456,43 +360,59 @@
     <!-- Metrics -->
     <section class="metrics">
       <div class="metric-card"><div class="metric-value">{{ total_files }}</div><div class="metric-label">文件总数</div></div>
-      <div class="metric-card"><div class="metric-value">{{ total_categories }}</div><div class="metric-label">分类数量</div></div>
+      <div class="metric-card"><div class="metric-value">{{ total_groups }}</div><div class="metric-label">大类</div></div>
       <div class="metric-card"><div class="metric-value">{{ categorized_files }}</div><div class="metric-label">已分类</div></div>
       <div class="metric-card"><div class="metric-value">{{ summarized_files }}</div><div class="metric-label">已有摘要</div></div>
     </section>
 
-    <!-- Cluster grid (home view) -->
-    <section class="cluster-grid" id="clusterGrid">
-      {% for category in categories %}
-      <article
-        class="cluster-card"
-        data-category-id="{{ category.id }}"
-        data-search="{{ category.search_text | e }}"
-        style="border-left-color: {{ category.color.border }};"
-      >
-        <div class="cluster-header">
-          <div class="cluster-topline">
-            <h2 class="cluster-name">{{ category.name | e }}</h2>
-            <div class="cluster-count">{{ category.count }}</div>
-          </div>
-          <div class="cluster-meta">{{ (category.top_types or "混合文件类型") | e }}</div>
+    <!-- Grouped cluster view (home) -->
+    <section id="homeView">
+      {% for group in groups %}
+      <div class="group-section" data-group-id="{{ group.id }}">
+        <div
+          class="group-header"
+          style="border-left-color: {{ group.color.border }};"
+          data-toggle-group="{{ group.id }}"
+        >
+          <span class="group-arrow">▾</span>
+          <span class="group-name">{{ group.name | e }}</span>
+          <span class="group-sub-count">{{ group.categories | length }} 个子类</span>
+          <span class="group-count">{{ group.count }} 个文件</span>
         </div>
-        <div class="cluster-body">
-          {% for file in category.preview_files %}
-          <div class="preview-item">
-            <div class="icon-badge {{ file.ext_class }}">{{ file.ext_label }}</div>
-            <div class="preview-info">
-              <div class="preview-title" title="{{ file.file_name | e }}">{{ file.file_name | e }}</div>
-              <div class="preview-brief">{{ file.display_brief | e }}</div>
+        <div class="group-body">
+          {% for category in group.categories %}
+          <article
+            class="cluster-card"
+            data-category-id="{{ category.id }}"
+            data-search="{{ category.search_text | e }}"
+            style="border-left-color: {{ category.color.border }};"
+          >
+            <div class="cluster-header">
+              <div class="cluster-topline">
+                <h2 class="cluster-name">{{ category.name | e }}</h2>
+                <div class="cluster-count">{{ category.count }}</div>
+              </div>
+              <div class="cluster-meta">{{ (category.top_types or "混合文件类型") | e }}</div>
             </div>
-          </div>
+            <div class="cluster-body">
+              {% for file in category.preview_files %}
+              <div class="preview-item">
+                <div class="icon-badge {{ file.ext_class }}">{{ file.ext_label }}</div>
+                <div class="preview-info">
+                  <div class="preview-title" title="{{ file.file_name | e }}">{{ file.file_name | e }}</div>
+                  <div class="preview-brief">{{ file.display_brief | e }}</div>
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+            <div class="cluster-footer">
+              <span>预览 {{ category.preview_count }}/{{ category.count }}</span>
+              <button class="cluster-link" type="button" data-open-category="{{ category.id }}">查看全部 →</button>
+            </div>
+          </article>
           {% endfor %}
         </div>
-        <div class="cluster-footer">
-          <span>预览 {{ category.preview_count }}/{{ category.count }}</span>
-          <button class="cluster-link" type="button" data-open-category="{{ category.id }}">查看全部 →</button>
-        </div>
-      </article>
+      </div>
       {% endfor %}
     </section>
 
@@ -505,6 +425,8 @@
       <nav class="breadcrumb">
         <button id="backButton" type="button">所有分类</button>
         <span>›</span>
+        <span id="detailBreadcrumbGroup"></span>
+        <span id="detailBreadcrumbSep" style="display:none">›</span>
         <span id="detailBreadcrumbName"></span>
       </nav>
       <div class="detail-head">
@@ -537,9 +459,11 @@
 
     /* ── Data & DOM refs ─────────────────────────────── */
     const reportData = {{ report_data_json | safe }};
-    const clusterGrid = document.getElementById('clusterGrid');
+    const homeView = document.getElementById('homeView');
     const detailView = document.getElementById('detailView');
     const detailTitle = document.getElementById('detailTitle');
+    const detailBreadcrumbGroup = document.getElementById('detailBreadcrumbGroup');
+    const detailBreadcrumbSep = document.getElementById('detailBreadcrumbSep');
     const detailBreadcrumbName = document.getElementById('detailBreadcrumbName');
     const detailSubtitle = document.getElementById('detailSubtitle');
     const detailList = document.getElementById('detailList');
@@ -549,6 +473,7 @@
     const backButton = document.getElementById('backButton');
     const searchBox = document.getElementById('searchBox');
     const emptyState = document.getElementById('emptyState');
+    const groupSections = Array.from(document.querySelectorAll('.group-section'));
     const clusterCards = Array.from(document.querySelectorAll('.cluster-card'));
     const detailPageSize = 120;
     const ESCAPE_MAP = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
@@ -560,6 +485,19 @@
       return String(v || '').replace(/[&<>"']/g, c => ESCAPE_MAP[c]);
     }
 
+    /* ── Group toggle ────────────────────────────────── */
+    document.addEventListener('click', e => {
+      const toggle = e.target.closest('[data-toggle-group]');
+      if (toggle) {
+        const section = toggle.closest('.group-section');
+        if (section) section.classList.toggle('collapsed');
+        return;
+      }
+      const btn = e.target.closest('[data-open-category]');
+      if (btn) renderDetail(btn.dataset.openCategory);
+    });
+
+    /* ── Detail rendering ────────────────────────────── */
     function buildDetailItem(file) {
       const hasSummary = Boolean(file.summary);
       const sourceClass = hasSummary ? 'has-summary' : 'inferred';
@@ -600,11 +538,22 @@
       const cat = reportData.categories.find(c => c.id === categoryId);
       if (!cat) return;
       currentDetailCategory = cat;
+      const parts = cat.name.split('/');
+      const parentName = parts.length > 1 ? parts[0].trim() : '';
+      const subName = parts.length > 1 ? parts.slice(1).join('/').trim() : cat.name;
       detailTitle.textContent = cat.name;
-      detailBreadcrumbName.textContent = cat.name;
+      if (parentName) {
+        detailBreadcrumbGroup.textContent = parentName;
+        detailBreadcrumbSep.style.display = '';
+        detailBreadcrumbName.textContent = subName;
+      } else {
+        detailBreadcrumbGroup.textContent = cat.name;
+        detailBreadcrumbSep.style.display = 'none';
+        detailBreadcrumbName.textContent = '';
+      }
       detailSubtitle.textContent = `${cat.count} 个文件 · ${cat.top_types || '混合文件类型'}`;
       appendDetailItems(true);
-      clusterGrid.style.display = 'none';
+      homeView.style.display = 'none';
       emptyState.classList.remove('active');
       detailView.classList.add('active');
       if (pushHash !== false) history.pushState({categoryId}, '', `#category=${encodeURIComponent(categoryId)}`);
@@ -613,7 +562,7 @@
 
     function showHome(pushHash) {
       detailView.classList.remove('active');
-      clusterGrid.style.display = '';
+      homeView.style.display = '';
       currentDetailCategory = null;
       detailRenderedCount = 0;
       detailLoadMore.classList.remove('active');
@@ -621,24 +570,32 @@
       if (pushHash !== false) history.pushState({}, '', '#');
     }
 
+    /* ── Search / filter ─────────────────────────────── */
     function updateEmptyState() {
-      const visible = clusterCards.filter(c => c.style.display !== 'none');
-      emptyState.classList.toggle('active', visible.length === 0);
+      const anyVisible = groupSections.some(g => g.style.display !== 'none');
+      emptyState.classList.toggle('active', !anyVisible);
     }
 
     function applyFilter(keyword) {
-      clusterCards.forEach(card => {
-        const haystack = card.dataset.search || '';
-        card.style.display = !keyword || haystack.includes(keyword) ? '' : 'none';
+      groupSections.forEach(group => {
+        const cards = Array.from(group.querySelectorAll('.cluster-card'));
+        let groupHasVisible = false;
+        cards.forEach(card => {
+          const haystack = card.dataset.search || '';
+          const visible = !keyword || haystack.includes(keyword);
+          card.style.display = visible ? '' : 'none';
+          if (visible) groupHasVisible = true;
+        });
+        group.style.display = groupHasVisible ? '' : 'none';
+        // Auto-expand groups with matches when searching
+        if (keyword && groupHasVisible) {
+          group.classList.remove('collapsed');
+        }
       });
       updateEmptyState();
     }
 
     /* ── Events ──────────────────────────────────────── */
-    document.addEventListener('click', e => {
-      const btn = e.target.closest('[data-open-category]');
-      if (btn) renderDetail(btn.dataset.openCategory);
-    });
     backButton.addEventListener('click', () => showHome());
     detailLoadMoreButton.addEventListener('click', () => appendDetailItems(false));
     searchBox.addEventListener('input', () => {
