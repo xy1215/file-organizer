@@ -241,6 +241,30 @@ def generate_reports(
             }
         )
 
+    # Build parent-level groups from "大类/子类" naming convention
+    group_order: list[str] = []
+    group_map: dict[str, list[dict]] = defaultdict(list)
+    for category in categories:
+        parent = category["name"].split("/")[0].strip() if "/" in category["name"] else category["name"]
+        if parent not in group_map:
+            group_order.append(parent)
+        group_map[parent].append(category)
+
+    groups: list[dict] = []
+    for gidx, group_name in enumerate(group_order):
+        children = group_map[group_name]
+        group_color = CATEGORY_COLORS[gidx % len(CATEGORY_COLORS)]
+        total_files = sum(c["count"] for c in children)
+        groups.append(
+            {
+                "id": f"grp-{gidx}",
+                "name": group_name,
+                "count": total_files,
+                "color": group_color,
+                "categories": children,
+            }
+        )
+
     payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "total_files": len(prepared),
@@ -278,8 +302,10 @@ def generate_reports(
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         total_files=len(prepared),
         total_categories=len(categories),
+        total_groups=len(groups),
         categorized_files=sum(1 for record in prepared if _clean_category_name(record.get("category")) != "未分类"),
         summarized_files=sum(1 for record in prepared if str(record.get("summary") or "").strip()),
+        groups=groups,
         categories=categories,
         report_data_json=_safe_json_for_script(report_data),
     )
