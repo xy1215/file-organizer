@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -96,6 +97,7 @@ MODEL_PRESETS = {
     },
 }
 CUSTOM_PRESET_KEY = "custom"
+LLM_CONFIRM_ENABLED_DEFAULT = True
 USER_GUIDE_HTML = """
 <h2>文件整理助手使用说明</h2>
 <p>这个工具的作用，是帮你扫描电脑里的文件，自动做分类和简要说明，并生成一份可以在浏览器里查看的整理报告。</p>
@@ -286,6 +288,9 @@ def default_config() -> dict[str, Any]:
             "auto_scan_enabled": False,
             "interval_minutes": 60,
         },
+        "ui": {
+            "confirm_before_llm": LLM_CONFIRM_ENABLED_DEFAULT,
+        },
     }
 
 
@@ -307,6 +312,7 @@ def load_config() -> dict[str, Any]:
     scan = ensure_dict(loaded.get("scan", {}))
     default_paths = ensure_dict(scan.get("default_paths", {}))
     automation = ensure_dict(loaded.get("automation", {}))
+    ui = ensure_dict(loaded.get("ui", {}))
 
     config["llm"].update(
         {
@@ -342,6 +348,11 @@ def load_config() -> dict[str, Any]:
             "interval_minutes": normalize_auto_scan_interval(
                 automation.get("interval_minutes", config["automation"]["interval_minutes"])
             ),
+        }
+    )
+    config["ui"].update(
+        {
+            "confirm_before_llm": bool(ui.get("confirm_before_llm", config["ui"]["confirm_before_llm"])),
         }
     )
     return config
@@ -437,6 +448,7 @@ class MainWindow(QMainWindow):
         self.available_update: UpdateInfo | None = None
         self.ignored_update_version: str | None = None
         self._manual_update_check_pending = False
+        self.confirm_before_llm = LLM_CONFIRM_ENABLED_DEFAULT
         self.update_progress_dialog: QProgressDialog | None = None
         self.current_total = 0
         self.current_progress = 0
@@ -822,6 +834,7 @@ class MainWindow(QMainWindow):
         scan = ensure_dict(config.get("scan", {}))
         default_paths = ensure_dict(scan.get("default_paths", {}))
         automation = ensure_dict(config.get("automation", {}))
+        ui = ensure_dict(config.get("ui", {}))
         self.provider_input.setText(str(llm.get("provider", "openai")))
         self.api_key_input.setText(str(llm.get("api_key", "")))
         self.model_input.setText(str(llm.get("model", "gpt-4o-mini")))
@@ -839,6 +852,7 @@ class MainWindow(QMainWindow):
         self.scan_desktop_checkbox.setChecked(bool(default_paths.get("desktop", True)))
         self.scan_documents_checkbox.setChecked(bool(default_paths.get("documents", True)))
         self.scan_downloads_checkbox.setChecked(bool(default_paths.get("downloads", True)))
+        self.confirm_before_llm = bool(ui.get("confirm_before_llm", LLM_CONFIRM_ENABLED_DEFAULT))
 
         self.path_list.clear()
         for path in ensure_str_list(scan.get("paths", [])):
@@ -875,6 +889,9 @@ class MainWindow(QMainWindow):
             "automation": {
                 "auto_scan_enabled": self.auto_scan_checkbox.isChecked(),
                 "interval_minutes": self.auto_scan_interval_input.value(),
+            },
+            "ui": {
+                "confirm_before_llm": self.confirm_before_llm,
             },
         }
 
@@ -975,6 +992,8 @@ class MainWindow(QMainWindow):
             return
 
         config = self._build_config_from_form()
+        if not self._confirm_llm_usage_if_needed(args):
+            return
         if not self._ensure_saved_config_for_run(config):
             return
         self._sync_auto_scan_timer()
@@ -1035,6 +1054,77 @@ class MainWindow(QMainWindow):
         self._phase_value.setText(phase)
         self._elapsed_value.setText(elapsed)
         self._progress_value.setText(progress)
+
+    def _confirm_llm_usage_if_needed(self, args: list[str]) -> bool:
+        if not self.confirm_before_llm:
+            return True
+        title, message = self._get_llm_confirmation_copy(args)
+        if title is None:
+            return True
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("继续前确认")
+        dialog.resize(460, 220)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(18, 18, 18, 18)
+        layout.setSpacing(12)
+
+        heading = QLabel(f"<b>{title}</b>")
+        heading.setWordWrap(True)
+        body = QLabel(message)
+        body.setWordWrap(True)
+        body.setStyleSheet("color: #57534e; line-height: 1.5;")
+        checkbox = QCheckBox("以后不再提醒")
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        ok_button = buttons.button(QDialogButtonBox.Ok)
+        cancel_button = buttons.button(QDialogButtonBox.Cancel)
+        if ok_button is not None:
+            ok_button.setText("继续")
+        if cancel_button is not None:
+            cancel_button.setText("取消")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        layout.addWidget(heading)
+        layout.addWidget(body)
+        layout.addWidget(checkbox)
+        layout.addStretch(1)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return False
+        if checkbox.isChecked():
+            self.confirm_before_llm = False
+            self._save_llm_confirmation_preference(False)
+        return True
+
+    def _get_llm_confirmation_copy(self, args: list[str]) -> tuple[str | None, str]:
+        if args == ["sync"]:
+            return (
+                "接下来会调用 AI 模型，可能产生费用",
+                "“完整整理（含摘要）”会使用 AI 进行文件分类，并尽量为文件生成摘要。这一步可能会产生费用。"
+                " 如果是第一次使用，建议先少量测试。",
+            )
+        if args == ["scan"] or args == ["scan", "--force"]:
+            return (
+                "接下来会调用 AI 模型，可能产生费用",
+                "“快速分类”会使用 AI 对扫描到的文件进行分类。这一步可能会产生费用。",
+            )
+        if args and args[0] == "summarize":
+            return (
+                "接下来会调用 AI 模型，可能产生费用",
+                "生成摘要会调用 AI 读取并概括文件内容。这一步通常比单纯分类更耗费额度，可能会产生费用。",
+            )
+        return None, ""
+
+    def _save_llm_confirmation_preference(self, enabled: bool) -> None:
+        saved_config = load_config()
+        ui = ensure_dict(saved_config.get("ui", {}))
+        ui["confirm_before_llm"] = enabled
+        saved_config["ui"] = ui
+        save_config(saved_config)
+        self._append_log("已保存设置：后续调用 AI 前不再提醒。")
 
     def _show_user_guide(self) -> None:
         dialog = QDialog(self)
