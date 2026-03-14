@@ -30,6 +30,7 @@ logging.basicConfig(
     filename=str(ERROR_LOG_PATH),
     level=logging.ERROR,
     format="%(asctime)s [%(levelname)s] %(message)s",
+    encoding="utf-8",
 )
 
 
@@ -76,6 +77,8 @@ def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as handle:
             loaded = yaml.safe_load(handle) or {}
+    except OSError as exc:
+        raise click.ClickException(f"无法读取 config.yaml：{exc}") from exc
     except yaml.YAMLError as exc:
         raise click.ClickException(f"config.yaml 格式错误，请先修正 YAML 语法：{exc}") from exc
     if not isinstance(loaded, dict):

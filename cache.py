@@ -30,7 +30,7 @@ class ScanState:
 class CacheDB:
     def __init__(self, db_path: str | Path = "cache.db") -> None:
         self.db_path = Path(db_path)
-        self.conn = sqlite3.connect(self.db_path)
+        self.conn = sqlite3.connect(self.db_path, timeout=30)
         self.conn.row_factory = sqlite3.Row
         self._init_schema()
 

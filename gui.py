@@ -301,7 +301,7 @@ def load_config() -> dict[str, Any]:
     try:
         with CONFIG_PATH.open("r", encoding="utf-8") as handle:
             loaded = yaml.safe_load(handle)
-    except yaml.YAMLError:
+    except (OSError, yaml.YAMLError):
         return config
     if not loaded:
         return config
@@ -827,6 +827,7 @@ class MainWindow(QMainWindow):
         self.log_output.setObjectName("logOutput")
         self.log_output.setReadOnly(True)
         self.log_output.setPlaceholderText("运行输出会显示在这里。")
+        self.log_output.setMaximumBlockCount(2000)
 
         clear_button = QPushButton("清空日志")
         clear_button.clicked.connect(self.log_output.clear)
@@ -941,7 +942,11 @@ class MainWindow(QMainWindow):
 
     def _save_form_config(self) -> None:
         config = self._build_config_from_form()
-        save_config(config)
+        try:
+            save_config(config)
+        except OSError as exc:
+            QMessageBox.warning(self, "保存失败", f"无法写入 config.yaml：{exc}")
+            return
         self._sync_auto_scan_timer()
         self._append_log("配置已保存到 config.yaml")
         QMessageBox.information(self, "保存成功", "配置已保存。")
@@ -959,7 +964,11 @@ class MainWindow(QMainWindow):
         )
         if reply != QMessageBox.Yes:
             return False
-        save_config(config)
+        try:
+            save_config(config)
+        except OSError as exc:
+            QMessageBox.warning(self, "保存失败", f"无法写入 config.yaml：{exc}")
+            return False
         self._append_log("运行前已保存当前配置。")
         return True
 
@@ -1153,7 +1162,11 @@ class MainWindow(QMainWindow):
         ui = ensure_dict(saved_config.get("ui", {}))
         ui["confirm_before_llm"] = enabled
         saved_config["ui"] = ui
-        save_config(saved_config)
+        try:
+            save_config(saved_config)
+        except OSError as exc:
+            QMessageBox.warning(self, "保存失败", f"无法保存提醒设置：{exc}")
+            return
         self._append_log("已保存设置：后续调用 AI 前不再提醒。")
 
     def _show_user_guide(self) -> None:

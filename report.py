@@ -134,6 +134,13 @@ def _clean_category_name(value: object) -> str:
     return name or "未分类"
 
 
+def _parent_category_name(category_name: str) -> str:
+    parts = [segment.strip() for segment in category_name.split("/") if segment.strip()]
+    if not parts:
+        return "未分类"
+    return parts[0]
+
+
 def _format_modified_time(value: object) -> str:
     try:
         timestamp = float(value)
@@ -245,7 +252,7 @@ def generate_reports(
     group_order: list[str] = []
     group_map: dict[str, list[dict]] = defaultdict(list)
     for category in categories:
-        parent = category["name"].split("/")[0].strip() if "/" in category["name"] else category["name"]
+        parent = _parent_category_name(category["name"])
         if parent not in group_map:
             group_order.append(parent)
         group_map[parent].append(category)

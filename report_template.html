@@ -445,12 +445,26 @@
   <script>
     /* ── Theme toggle ────────────────────────────────── */
     const themeToggle = document.getElementById('themeToggle');
+    function getStoredTheme() {
+      try {
+        return localStorage.getItem('fo-theme');
+      } catch (error) {
+        return null;
+      }
+    }
+    function setStoredTheme(theme) {
+      try {
+        localStorage.setItem('fo-theme', theme);
+      } catch (error) {
+        // Some browsers restrict localStorage for local file access.
+      }
+    }
     function applyTheme(theme) {
       document.documentElement.setAttribute('data-theme', theme);
       themeToggle.textContent = theme === 'dark' ? '☾' : '☀';
-      localStorage.setItem('fo-theme', theme);
+      setStoredTheme(theme);
     }
-    const savedTheme = localStorage.getItem('fo-theme')
+    const savedTheme = getStoredTheme()
       || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     applyTheme(savedTheme);
     themeToggle.addEventListener('click', () => {
@@ -570,6 +584,15 @@
       if (pushHash !== false) history.pushState({}, '', '#');
     }
 
+    function decodeCategoryFromHash(hash) {
+      if (!hash.startsWith('#category=')) return null;
+      try {
+        return decodeURIComponent(hash.slice(10));
+      } catch (error) {
+        return null;
+      }
+    }
+
     /* ── Search / filter ─────────────────────────────── */
     function updateEmptyState() {
       const anyVisible = groupSections.some(g => g.style.display !== 'none');
@@ -605,13 +628,18 @@
     });
     window.addEventListener('popstate', () => {
       const hash = location.hash || '';
-      if (hash.startsWith('#category=')) renderDetail(decodeURIComponent(hash.slice(10)), false);
-      else showHome(false);
+      const categoryId = decodeCategoryFromHash(hash);
+      if (categoryId) {
+        renderDetail(categoryId, false);
+        return;
+      }
+      showHome(false);
     });
 
     /* ── Init ────────────────────────────────────────── */
     const initHash = location.hash || '';
-    if (initHash.startsWith('#category=')) renderDetail(decodeURIComponent(initHash.slice(10)), false);
+    const initialCategoryId = decodeCategoryFromHash(initHash);
+    if (initialCategoryId) renderDetail(initialCategoryId, false);
     else applyFilter('');
   </script>
 </body>
