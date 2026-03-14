@@ -5,538 +5,511 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>文件整理报告</title>
   <style>
+    /* ═══════════════════════════════════════════════════
+       统一色板 — 纸与墨
+       背景    Light: #f7f5f2   Dark: #1a1918
+       卡片    Light: #ffffff   Dark: #242322
+       主墨    Light: #1c1917   Dark: #e7e5e0
+       次墨    Light: #78716c   Dark: #a8a29e
+       强调    #b45309 (琥珀)
+       ═══════════════════════════════════════════════════ */
     :root {
-      color-scheme: light dark;
-      --bg: #f3f0ea;
-      --paper: rgba(255,255,255,0.82);
-      --panel: rgba(255,255,255,0.9);
-      --text: #1f2933;
-      --muted: #667085;
-      --line: rgba(36, 53, 71, 0.12);
-      --shadow: 0 14px 36px rgba(52, 64, 84, 0.10);
-      --radius-xl: 28px;
-      --radius-lg: 22px;
-      --radius-md: 16px;
-      --radius-sm: 12px;
+      --bg: #f7f5f2;
+      --card: #ffffff;
+      --card-hover: #fafaf9;
+      --text: #1c1917;
+      --muted: #78716c;
+      --faint: #a8a29e;
+      --line: #e7e5e0;
+      --accent: #b45309;
+      --accent-light: #fef3c7;
+      --shadow: 0 1px 3px rgba(28,25,23,0.06), 0 6px 16px rgba(28,25,23,0.04);
+      --radius: 16px;
+      --radius-sm: 10px;
+      --radius-xs: 6px;
     }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #16181c;
-        --paper: rgba(26,28,33,0.82);
-        --panel: rgba(31,34,40,0.92);
-        --text: #edf2f7;
-        --muted: #9aa6b2;
-        --line: rgba(237, 242, 247, 0.10);
-        --shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
-      }
+    [data-theme="dark"] {
+      --bg: #1a1918;
+      --card: #242322;
+      --card-hover: #2d2c2a;
+      --text: #e7e5e0;
+      --muted: #a8a29e;
+      --faint: #78716c;
+      --line: #333231;
+      --accent: #d97706;
+      --accent-light: #422006;
+      --shadow: 0 1px 3px rgba(0,0,0,0.2), 0 6px 16px rgba(0,0,0,0.15);
     }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
       color: var(--text);
-      background:
-        radial-gradient(circle at top left, rgba(210,141,82,0.16), transparent 26%),
-        radial-gradient(circle at top right, rgba(111,136,201,0.12), transparent 24%),
-        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0)),
-        var(--bg);
+      background: var(--bg);
       min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
     }
-    a { color: inherit; }
-    .shell {
-      max-width: 1480px;
-      margin: 0 auto;
-      padding: 28px 20px 56px;
-    }
-    .hero {
-      display: grid;
-      grid-template-columns: 1.3fr 0.9fr;
-      gap: 18px;
-      margin-bottom: 18px;
-    }
-    .hero-panel, .toolbar, .detail, .empty-state {
-      background: var(--paper);
-      border: 1px solid var(--line);
-      box-shadow: var(--shadow);
-      backdrop-filter: blur(14px);
-    }
-    .hero-panel {
-      border-radius: var(--radius-xl);
-      padding: 28px;
-    }
-    .eyebrow {
-      font-size: 12px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-    .hero h1 {
-      margin: 0;
-      font-size: clamp(30px, 4vw, 54px);
-      line-height: 1.02;
-      letter-spacing: -0.03em;
-    }
-    .hero p {
-      margin: 14px 0 0;
-      max-width: 760px;
-      color: var(--muted);
-      font-size: 15px;
-    }
-    .meta-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Shell ─────────────────────────────────────── */
+    .shell { max-width: 1400px; margin: 0 auto; padding: 20px 20px 48px; }
+
+    /* ── Top bar ───────────────────────────────────── */
+    .topbar {
+      display: flex;
+      align-items: center;
       gap: 12px;
-      align-content: start;
-    }
-    .meta-card {
-      border-radius: var(--radius-lg);
-      padding: 20px;
-      background: var(--panel);
+      padding: 12px 20px;
+      background: var(--card);
       border: 1px solid var(--line);
-    }
-    .meta-card strong {
-      display: block;
-      font-size: 28px;
-      line-height: 1;
-      margin-bottom: 6px;
-    }
-    .meta-card span {
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .toolbar {
-      border-radius: var(--radius-xl);
-      padding: 18px 20px;
-      margin-bottom: 20px;
-      display: flex;
-      gap: 16px;
-      align-items: center;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      margin-bottom: 12px;
       flex-wrap: wrap;
     }
-    .toolbar .field {
+    .topbar-title {
+      font-size: 18px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .topbar-badge {
+      background: var(--accent-light);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: var(--radius-xs);
+    }
+    .topbar-search {
       flex: 1;
-      min-width: 220px;
-    }
-    .toolbar label {
-      display: block;
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }
-    .toolbar input {
-      width: 100%;
-      padding: 12px 14px;
+      min-width: 200px;
+      padding: 8px 14px;
       border-radius: 999px;
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.58);
+      background: var(--bg);
       color: var(--text);
+      font-size: 13px;
       outline: none;
+      transition: border-color 0.15s;
     }
-    .toolbar input:focus {
-      border-color: rgba(111,136,201,0.7);
-      box-shadow: 0 0 0 4px rgba(111,136,201,0.12);
+    .topbar-search:focus {
+      border-color: var(--accent);
     }
-    .legend {
+    .theme-toggle {
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      width: 36px;
+      height: 36px;
+      cursor: pointer;
+      font-size: 16px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      color: var(--muted);
+      justify-content: center;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .theme-toggle:hover { background: var(--card-hover); }
+
+    /* ── Metric bar ────────────────────────────────── */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .metric-card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+    }
+    .metric-value {
+      font-size: 28px;
+      font-weight: 800;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .metric-label {
       font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
     }
-    .legend .dot {
-      width: 10px;
-      height: 10px;
-      border-radius: 999px;
-      display: inline-block;
-    }
+
+    /* ── Cluster grid ──────────────────────────────── */
     .cluster-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(285px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 12px;
     }
     .cluster-card {
-      border-radius: var(--radius-lg);
+      background: var(--card);
       border: 1px solid var(--line);
-      overflow: hidden;
-      background: var(--panel);
+      border-radius: var(--radius);
       box-shadow: var(--shadow);
-      min-height: 214px;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
-      transition: transform 0.18s ease, box-shadow 0.18s ease;
+      transition: transform 0.15s, box-shadow 0.15s;
+      border-left: 4px solid var(--line);
     }
     .cluster-card:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 18px 34px rgba(52, 64, 84, 0.14);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(28,25,23,0.08);
     }
     .cluster-header {
-      padding: 18px 18px 14px;
-      border-bottom: 1px solid rgba(0,0,0,0.04);
+      padding: 16px 16px 12px;
     }
     .cluster-topline {
       display: flex;
       justify-content: space-between;
-      gap: 12px;
       align-items: flex-start;
-      margin-bottom: 10px;
+      gap: 8px;
+      margin-bottom: 6px;
     }
     .cluster-name {
-      margin: 0;
-      font-size: 18px;
-      line-height: 1.15;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.2;
     }
     .cluster-count {
       flex-shrink: 0;
-      padding: 5px 10px;
-      border-radius: 999px;
       font-size: 12px;
       font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: var(--accent-light);
+      color: var(--accent);
     }
     .cluster-meta {
-      color: var(--muted);
       font-size: 12px;
+      color: var(--muted);
     }
     .cluster-body {
-      padding: 14px 18px 18px;
+      padding: 0 16px 16px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
-      flex: 1;
-    }
-    .cluster-preview {
-      display: flex;
-      flex-direction: column;
-      gap: 9px;
+      gap: 8px;
       flex: 1;
     }
     .preview-item {
-      display: grid;
-      grid-template-columns: 36px 1fr;
+      display: flex;
       gap: 10px;
-      align-items: start;
-      padding: 10px 12px;
-      border-radius: var(--radius-sm);
-      background: rgba(255,255,255,0.36);
-      border: 1px solid rgba(255,255,255,0.22);
-      min-height: 64px;
+      align-items: flex-start;
+      padding: 8px 10px;
+      border-radius: var(--radius-xs);
+      background: var(--bg);
     }
     .icon-badge {
-      width: 36px;
-      height: 36px;
-      border-radius: 12px;
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
-      letter-spacing: 0.05em;
-      background: rgba(255,255,255,0.7);
+      flex-shrink: 0;
     }
-    .ext-doc { color: #2751a3; background: rgba(205, 224, 255, 0.92); }
-    .ext-xls { color: #1f7a46; background: rgba(206, 240, 214, 0.92); }
-    .ext-ppt { color: #b54725; background: rgba(252, 221, 213, 0.92); }
-    .ext-pdf { color: #b42344; background: rgba(252, 216, 228, 0.92); }
-    .ext-img { color: #946200; background: rgba(250, 236, 190, 0.92); }
-    .ext-media { color: #0f766e; background: rgba(210, 244, 238, 0.92); }
-    .ext-code { color: #5b3cc4; background: rgba(229, 220, 255, 0.92); }
-    .ext-zip { color: #5f4b32; background: rgba(232, 225, 215, 0.92); }
-    .ext-other { color: #52606d; background: rgba(227, 233, 240, 0.92); }
+    .ext-doc  { color: #2751a3; background: #e8f0fe; }
+    .ext-xls  { color: #1f7a46; background: #e6f4ea; }
+    .ext-ppt  { color: #b54725; background: #fce8e6; }
+    .ext-pdf  { color: #b42344; background: #fce4ec; }
+    .ext-img  { color: #946200; background: #fef7e0; }
+    .ext-media{ color: #0f766e; background: #e0f2f1; }
+    .ext-code { color: #5b3cc4; background: #ede7f6; }
+    .ext-zip  { color: #5f4b32; background: #efebe9; }
+    .ext-other{ color: #52606d; background: #eceff1; }
+    [data-theme="dark"] .ext-doc  { color: #90b4f8; background: #1e2a4a; }
+    [data-theme="dark"] .ext-xls  { color: #81c784; background: #1b3a26; }
+    [data-theme="dark"] .ext-ppt  { color: #ef9a84; background: #3e211a; }
+    [data-theme="dark"] .ext-pdf  { color: #f48fb1; background: #3e1929; }
+    [data-theme="dark"] .ext-img  { color: #ffd54f; background: #3e3215; }
+    [data-theme="dark"] .ext-media{ color: #80cbc4; background: #1a3533; }
+    [data-theme="dark"] .ext-code { color: #b39ddb; background: #2a1f4e; }
+    [data-theme="dark"] .ext-zip  { color: #bcaaa4; background: #2e2520; }
+    [data-theme="dark"] .ext-other{ color: #90a4ae; background: #263238; }
+    .preview-info { min-width: 0; flex: 1; }
     .preview-title {
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 600;
       line-height: 1.3;
-      margin-bottom: 2px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .preview-brief {
       font-size: 12px;
-      line-height: 1.35;
       color: var(--muted);
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    .cluster-actions {
+    .cluster-footer {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding-top: 6px;
+      padding: 10px 16px;
+      border-top: 1px solid var(--line);
     }
-    .cluster-actions span {
-      font-size: 12px;
-      color: var(--muted);
+    .cluster-footer span {
+      font-size: 11px;
+      color: var(--faint);
     }
     .cluster-link {
-      border: 0;
-      background: rgba(255,255,255,0.72);
-      color: var(--text);
-      padding: 10px 14px;
-      border-radius: 999px;
+      border: none;
+      background: transparent;
+      color: var(--accent);
       cursor: pointer;
       font-size: 13px;
       font-weight: 700;
-      border: 1px solid rgba(0,0,0,0.06);
+      padding: 4px 0;
     }
-    .cluster-link:hover {
-      filter: brightness(0.98);
-    }
+    .cluster-link:hover { text-decoration: underline; }
+
+    /* ── Detail view ───────────────────────────────── */
     .detail {
       display: none;
-      border-radius: var(--radius-xl);
-      padding: 22px;
-      margin-top: 22px;
+      animation: fadeIn 0.2s ease;
     }
-    .detail.active {
-      display: block;
+    .detail.active { display: block; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
-    .detail-head {
+    .breadcrumb {
       display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      align-items: flex-start;
-      margin-bottom: 18px;
-      flex-wrap: wrap;
-    }
-    .back-link {
-      border: 0;
-      border-radius: 999px;
-      padding: 11px 16px;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
       font-size: 13px;
-      font-weight: 700;
+      color: var(--muted);
+    }
+    .breadcrumb button {
+      background: none;
+      border: none;
       cursor: pointer;
-      background: rgba(255,255,255,0.66);
-      color: var(--text);
-      border: 1px solid var(--line);
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 13px;
+      padding: 0;
+    }
+    .breadcrumb button:hover { text-decoration: underline; }
+    .detail-head {
+      margin-bottom: 16px;
     }
     .detail-title {
-      margin: 0;
-      font-size: 30px;
-      line-height: 1.05;
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 6px;
     }
     .detail-subtitle {
-      margin-top: 8px;
       color: var(--muted);
-      font-size: 14px;
+      font-size: 13px;
     }
     .detail-list {
-      display: grid;
-      gap: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
     .detail-item {
-      border-radius: var(--radius-md);
-      padding: 16px 18px;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.48);
       display: grid;
-      grid-template-columns: 42px 1fr auto;
-      gap: 14px;
+      grid-template-columns: 36px 1fr auto;
+      gap: 12px;
       align-items: start;
+      padding: 14px 16px;
+      border-radius: var(--radius-sm);
+      background: var(--card);
+      border: 1px solid var(--line);
     }
-    .detail-main {
-      min-width: 0;
-    }
+    .detail-main { min-width: 0; }
     .detail-file {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 700;
-      line-height: 1.35;
+      line-height: 1.3;
       margin-bottom: 4px;
       word-break: break-word;
+    }
+    .detail-source {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-bottom: 4px;
+    }
+    .detail-source.has-summary {
+      color: var(--accent);
+      background: var(--accent-light);
+    }
+    .detail-source.inferred {
+      color: var(--faint);
+      background: var(--bg);
+      border: 1px dashed var(--line);
     }
     .detail-brief {
       font-size: 13px;
       color: var(--muted);
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       word-break: break-word;
-    }
-    .detail-source {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 8px;
-      padding: 3px 8px;
-      border-radius: 999px;
-      font-size: 11px;
-      letter-spacing: 0.02em;
-      color: #6a5643;
-      background: rgba(210, 141, 82, 0.14);
-      border: 1px solid rgba(210, 141, 82, 0.24);
-    }
-    .detail-summary {
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px dashed var(--line);
-      font-size: 12px;
-      color: var(--muted);
-      white-space: pre-wrap;
     }
     .detail-meta {
       font-size: 12px;
-      color: var(--muted);
+      color: var(--faint);
       word-break: break-word;
     }
-    .detail-meta a {
-      text-decoration: none;
+    .detail-meta a { color: var(--muted); }
+    .detail-meta a:hover { color: var(--accent); }
+    .detail-summary {
+      margin-top: 8px;
     }
-    .detail-meta a:hover {
-      text-decoration: underline;
+    .detail-summary summary {
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 600;
+      user-select: none;
+    }
+    .detail-summary pre {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: inherit;
+      line-height: 1.5;
     }
     .detail-size {
       font-size: 12px;
-      color: var(--muted);
+      color: var(--faint);
       white-space: nowrap;
-      margin-top: 4px;
-    }
-    .empty-state {
-      border-radius: var(--radius-xl);
-      padding: 48px 24px;
-      text-align: center;
-      color: var(--muted);
-      display: none;
-    }
-    .empty-state.active {
-      display: block;
-    }
-    .footnote {
-      margin-top: 18px;
-      font-size: 12px;
-      color: var(--muted);
+      text-align: right;
     }
     .detail-load-more {
-      margin-top: 16px;
+      margin-top: 12px;
       display: none;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-      color: var(--muted);
       font-size: 12px;
+      color: var(--muted);
     }
-    .detail-load-more.active {
-      display: flex;
-    }
+    .detail-load-more.active { display: flex; }
     .detail-load-more button {
+      background: var(--card);
       border: 1px solid var(--line);
-      background: rgba(255,255,255,0.72);
-      color: var(--text);
-      padding: 9px 14px;
       border-radius: 999px;
+      padding: 8px 16px;
       cursor: pointer;
       font-size: 13px;
-      font-weight: 700;
+      font-weight: 600;
+      color: var(--text);
     }
-    .detail-load-more button:hover {
-      filter: brightness(0.98);
+    .detail-load-more button:hover { background: var(--card-hover); }
+
+    /* ── Empty state ───────────────────────────────── */
+    .empty-state {
+      display: none;
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--muted);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
     }
-    @media (max-width: 980px) {
-      .hero {
-        grid-template-columns: 1fr;
-      }
-      .detail-item {
-        grid-template-columns: 42px 1fr;
-      }
-      .detail-size {
-        grid-column: 2;
-      }
+    .empty-state.active { display: block; }
+
+    /* ── Footer ────────────────────────────────────── */
+    .footnote {
+      margin-top: 16px;
+      font-size: 11px;
+      color: var(--faint);
     }
-    @media (max-width: 640px) {
-      .shell {
-        padding: 18px 14px 42px;
-      }
-      .hero-panel, .toolbar, .detail {
-        border-radius: 22px;
-        padding: 18px;
-      }
-      .cluster-grid {
-        grid-template-columns: 1fr;
-      }
-      .meta-grid {
-        grid-template-columns: 1fr 1fr;
-      }
+
+    /* ── Responsive ────────────────────────────────── */
+    @media (max-width: 768px) {
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .cluster-grid { grid-template-columns: 1fr; }
+      .detail-item { grid-template-columns: 36px 1fr; }
+      .detail-size { grid-column: 2; }
+      .topbar { gap: 8px; }
+    }
+    @media (max-width: 480px) {
+      .shell { padding: 12px 12px 36px; }
+      .metrics { grid-template-columns: 1fr 1fr; }
+      .metric-value { font-size: 22px; }
     }
   </style>
 </head>
 <body>
   <div class="shell">
-    <section class="hero">
-      <div class="hero-panel">
-        <div class="eyebrow">Local File Organizer</div>
-        <h1>文件被整理成一组一组可浏览的 cluster</h1>
-        <p>首页默认折叠展示分类，方便同时扫视很多 cluster。点开任一 cluster 后，会切换到完整详情视图，查看这一类下的全部文件、推测描述与已有摘要。</p>
-      </div>
-      <div class="meta-grid">
-        <div class="meta-card"><strong>{{ total_files }}</strong><span>文件总数</span></div>
-        <div class="meta-card"><strong>{{ total_categories }}</strong><span>分类数量</span></div>
-        <div class="meta-card"><strong>{{ categorized_files }}</strong><span>已分类文件</span></div>
-        <div class="meta-card"><strong>{{ summarized_files }}</strong><span>已有摘要</span></div>
-      </div>
+
+    <!-- Top bar -->
+    <div class="topbar">
+      <span class="topbar-title">文件整理报告</span>
+      <span class="topbar-badge">{{ generated_at }}</span>
+      <input id="searchBox" class="topbar-search" type="text" placeholder="搜索分类、文件名或描述...">
+      <button class="theme-toggle" id="themeToggle" title="切换深浅色">☀</button>
+    </div>
+
+    <!-- Metrics -->
+    <section class="metrics">
+      <div class="metric-card"><div class="metric-value">{{ total_files }}</div><div class="metric-label">文件总数</div></div>
+      <div class="metric-card"><div class="metric-value">{{ total_categories }}</div><div class="metric-label">分类数量</div></div>
+      <div class="metric-card"><div class="metric-value">{{ categorized_files }}</div><div class="metric-label">已分类</div></div>
+      <div class="metric-card"><div class="metric-value">{{ summarized_files }}</div><div class="metric-label">已有摘要</div></div>
     </section>
 
-    <section class="toolbar" id="homeToolbar">
-      <div class="field">
-        <label for="searchBox">快速搜索</label>
-        <input id="searchBox" type="text" placeholder="按分类名、文件名、简短描述搜索">
-      </div>
-      <div class="legend">
-        <span>生成时间：{{ generated_at }}</span>
-        <span class="dot" style="background:#d28d52;"></span><span>折叠浏览</span>
-        <span class="dot" style="background:#6f88c9;"></span><span>点击进入详情</span>
-      </div>
-    </section>
-
+    <!-- Cluster grid (home view) -->
     <section class="cluster-grid" id="clusterGrid">
       {% for category in categories %}
       <article
         class="cluster-card"
         data-category-id="{{ category.id }}"
         data-search="{{ category.search_text | e }}"
-        style="background:{{ category.color.surface }}; border-color:{{ category.color.border }};"
+        style="border-left-color: {{ category.color.border }};"
       >
         <div class="cluster-header">
           <div class="cluster-topline">
             <h2 class="cluster-name">{{ category.name | e }}</h2>
-            <div class="cluster-count" style="background:{{ category.color.pill }}; color:{{ category.color.accent }};">{{ category.count }} 个</div>
+            <div class="cluster-count">{{ category.count }}</div>
           </div>
           <div class="cluster-meta">{{ (category.top_types or "混合文件类型") | e }}</div>
         </div>
         <div class="cluster-body">
-          <div class="cluster-preview">
           {% for file in category.preview_files %}
-            <div class="preview-item">
-              <div class="icon-badge {{ file.ext_class }}">{{ file.ext_label }}</div>
-              <div>
-                <div class="preview-title" title="{{ file.file_name | e }}">{{ file.file_name | e }}</div>
-                <div class="preview-brief">{{ file.display_brief | e }}</div>
-              </div>
+          <div class="preview-item">
+            <div class="icon-badge {{ file.ext_class }}">{{ file.ext_label }}</div>
+            <div class="preview-info">
+              <div class="preview-title" title="{{ file.file_name | e }}">{{ file.file_name | e }}</div>
+              <div class="preview-brief">{{ file.display_brief | e }}</div>
             </div>
-            {% endfor %}
           </div>
-          <div class="cluster-actions">
-            <span>默认折叠，仅展示 {{ category.preview_count }} 个预览文件</span>
-            <button class="cluster-link" type="button" data-open-category="{{ category.id }}">查看完整分类</button>
-          </div>
+          {% endfor %}
+        </div>
+        <div class="cluster-footer">
+          <span>预览 {{ category.preview_count }}/{{ category.count }}</span>
+          <button class="cluster-link" type="button" data-open-category="{{ category.id }}">查看全部 →</button>
         </div>
       </article>
       {% endfor %}
     </section>
 
     <section class="empty-state" id="emptyState">
-      没有匹配到任何 cluster。可以换个关键词，或清空搜索重新浏览。
+      没有匹配到任何分类。试试换个关键词？
     </section>
 
+    <!-- Detail view -->
     <section class="detail" id="detailView">
+      <nav class="breadcrumb">
+        <button id="backButton" type="button">所有分类</button>
+        <span>›</span>
+        <span id="detailBreadcrumbName"></span>
+      </nav>
       <div class="detail-head">
-        <div>
-          <div class="eyebrow" id="detailEyebrow">Cluster Detail</div>
-          <h2 class="detail-title" id="detailTitle">分类详情</h2>
-          <div class="detail-subtitle" id="detailSubtitle"></div>
-        </div>
-        <button class="back-link" id="backButton" type="button">返回所有 cluster</button>
+        <h2 class="detail-title" id="detailTitle">分类详情</h2>
+        <div class="detail-subtitle" id="detailSubtitle"></div>
       </div>
       <div class="detail-list" id="detailList"></div>
       <div class="detail-load-more" id="detailLoadMore">
@@ -548,10 +521,26 @@
   </div>
 
   <script>
+    /* ── Theme toggle ────────────────────────────────── */
+    const themeToggle = document.getElementById('themeToggle');
+    function applyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      themeToggle.textContent = theme === 'dark' ? '☾' : '☀';
+      localStorage.setItem('fo-theme', theme);
+    }
+    const savedTheme = localStorage.getItem('fo-theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    applyTheme(savedTheme);
+    themeToggle.addEventListener('click', () => {
+      applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
+
+    /* ── Data & DOM refs ─────────────────────────────── */
     const reportData = {{ report_data_json | safe }};
     const clusterGrid = document.getElementById('clusterGrid');
     const detailView = document.getElementById('detailView');
     const detailTitle = document.getElementById('detailTitle');
+    const detailBreadcrumbName = document.getElementById('detailBreadcrumbName');
     const detailSubtitle = document.getElementById('detailSubtitle');
     const detailList = document.getElementById('detailList');
     const detailLoadMore = document.getElementById('detailLoadMore');
@@ -562,58 +551,43 @@
     const emptyState = document.getElementById('emptyState');
     const clusterCards = Array.from(document.querySelectorAll('.cluster-card'));
     const detailPageSize = 120;
-    const ESCAPE_MAP = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
-    };
+    const ESCAPE_MAP = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
     let currentDetailCategory = null;
     let detailRenderedCount = 0;
     let filterFrame = null;
 
-    function escapeHtml(value) {
-      return String(value || '').replace(/[&<>"']/g, (ch) => ESCAPE_MAP[ch]);
+    function escapeHtml(v) {
+      return String(v || '').replace(/[&<>"']/g, c => ESCAPE_MAP[c]);
     }
 
     function buildDetailItem(file) {
       const hasSummary = Boolean(file.summary);
-      const source = hasSummary
-        ? '<div class="detail-source">已读取正文生成摘要</div>'
-        : '<div class="detail-source">当前仅根据文件名和路径推测</div>';
+      const sourceClass = hasSummary ? 'has-summary' : 'inferred';
+      const sourceText = hasSummary ? '已生成摘要' : '基于文件名推测';
       const brief = file.display_brief
-        ? `<div class="detail-brief">${escapeHtml(file.display_brief)}</div>`
-        : '';
+        ? `<div class="detail-brief">${escapeHtml(file.display_brief)}</div>` : '';
       const summary = hasSummary
-        ? `<div class="detail-summary">${escapeHtml(file.summary)}</div>`
-        : '';
+        ? `<div class="detail-summary"><details><summary>展开摘要</summary><pre>${escapeHtml(file.summary)}</pre></details></div>` : '';
       return `
         <article class="detail-item">
           <div class="icon-badge ${escapeHtml(file.ext_class)}">${escapeHtml(file.ext_label)}</div>
           <div class="detail-main">
             <div class="detail-file">${escapeHtml(file.file_name)}</div>
-            ${source}
+            <span class="detail-source ${sourceClass}">${sourceText}</span>
             ${brief}
             <div class="detail-meta">${escapeHtml(file.modified_at)} · <a href="${escapeHtml(file.file_uri)}">${escapeHtml(file.file_path)}</a></div>
             ${summary}
           </div>
           <div class="detail-size">${escapeHtml(file.file_size_human)}</div>
-        </article>
-      `;
+        </article>`;
     }
 
-    function appendDetailItems(reset = false) {
+    function appendDetailItems(reset) {
       if (!currentDetailCategory) return;
-      if (reset) {
-        detailList.innerHTML = '';
-        detailRenderedCount = 0;
-      }
+      if (reset) { detailList.innerHTML = ''; detailRenderedCount = 0; }
       const files = currentDetailCategory.files || [];
       const chunk = files.slice(detailRenderedCount, detailRenderedCount + detailPageSize);
-      if (chunk.length > 0) {
-        detailList.insertAdjacentHTML('beforeend', chunk.map(buildDetailItem).join(''));
-      }
+      if (chunk.length) detailList.insertAdjacentHTML('beforeend', chunk.map(buildDetailItem).join(''));
       detailRenderedCount += chunk.length;
       const hasMore = detailRenderedCount < files.length;
       detailLoadMore.classList.toggle('active', hasMore);
@@ -622,95 +596,66 @@
       detailLoadMoreButton.disabled = !hasMore;
     }
 
-    function renderDetail(categoryId, pushHash = true) {
-      const category = reportData.categories.find((item) => item.id === categoryId);
-      if (!category) return;
-
-      currentDetailCategory = category;
-      detailTitle.textContent = category.name;
-      detailSubtitle.textContent = `${category.count} 个文件 · ${category.top_types || '混合文件类型'}`;
+    function renderDetail(categoryId, pushHash) {
+      const cat = reportData.categories.find(c => c.id === categoryId);
+      if (!cat) return;
+      currentDetailCategory = cat;
+      detailTitle.textContent = cat.name;
+      detailBreadcrumbName.textContent = cat.name;
+      detailSubtitle.textContent = `${cat.count} 个文件 · ${cat.top_types || '混合文件类型'}`;
       appendDetailItems(true);
-
       clusterGrid.style.display = 'none';
       emptyState.classList.remove('active');
       detailView.classList.add('active');
-
-      if (pushHash) {
-        history.pushState({ categoryId }, '', `#category=${encodeURIComponent(categoryId)}`);
-      }
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      if (pushHash !== false) history.pushState({categoryId}, '', `#category=${encodeURIComponent(categoryId)}`);
+      window.scrollTo({top: 0, behavior: 'smooth'});
     }
 
-    function showHome(pushHash = true) {
+    function showHome(pushHash) {
       detailView.classList.remove('active');
       clusterGrid.style.display = '';
       currentDetailCategory = null;
       detailRenderedCount = 0;
       detailLoadMore.classList.remove('active');
-      detailLoadMoreText.textContent = '';
       updateEmptyState();
-      if (pushHash) {
-        history.pushState({}, '', '#');
-      }
+      if (pushHash !== false) history.pushState({}, '', '#');
     }
 
     function updateEmptyState() {
-      const visibleCards = clusterCards.filter((card) => card.style.display !== 'none');
-      emptyState.classList.toggle('active', visibleCards.length === 0);
+      const visible = clusterCards.filter(c => c.style.display !== 'none');
+      emptyState.classList.toggle('active', visible.length === 0);
     }
 
-    function applyClusterFilter(keyword) {
-      clusterCards.forEach((card) => {
+    function applyFilter(keyword) {
+      clusterCards.forEach(card => {
         const haystack = card.dataset.search || '';
         card.style.display = !keyword || haystack.includes(keyword) ? '' : 'none';
       });
       updateEmptyState();
     }
 
-    function filterClusters() {
-      const keyword = searchBox.value.trim().toLowerCase();
-      if (filterFrame !== null) {
-        cancelAnimationFrame(filterFrame);
-      }
-      filterFrame = requestAnimationFrame(() => {
-        applyClusterFilter(keyword);
-        filterFrame = null;
-      });
-    }
-
-    document.addEventListener('click', (event) => {
-      const button = event.target.closest('[data-open-category]');
-      if (!button) return;
-      renderDetail(button.dataset.openCategory);
+    /* ── Events ──────────────────────────────────────── */
+    document.addEventListener('click', e => {
+      const btn = e.target.closest('[data-open-category]');
+      if (btn) renderDetail(btn.dataset.openCategory);
     });
-
-    backButton.addEventListener('click', () => {
-      showHome();
-    });
-
-    detailLoadMoreButton.addEventListener('click', () => {
-      appendDetailItems(false);
-    });
-
+    backButton.addEventListener('click', () => showHome());
+    detailLoadMoreButton.addEventListener('click', () => appendDetailItems(false));
     searchBox.addEventListener('input', () => {
-      filterClusters();
+      const kw = searchBox.value.trim().toLowerCase();
+      if (filterFrame !== null) cancelAnimationFrame(filterFrame);
+      filterFrame = requestAnimationFrame(() => { applyFilter(kw); filterFrame = null; });
     });
-
     window.addEventListener('popstate', () => {
-      const hash = window.location.hash || '';
-      if (hash.startsWith('#category=')) {
-        renderDetail(decodeURIComponent(hash.slice('#category='.length)), false);
-      } else {
-        showHome(false);
-      }
+      const hash = location.hash || '';
+      if (hash.startsWith('#category=')) renderDetail(decodeURIComponent(hash.slice(10)), false);
+      else showHome(false);
     });
 
-    const initialHash = window.location.hash || '';
-    if (initialHash.startsWith('#category=')) {
-      renderDetail(decodeURIComponent(initialHash.slice('#category='.length)), false);
-    } else {
-      filterClusters();
-    }
+    /* ── Init ────────────────────────────────────────── */
+    const initHash = location.hash || '';
+    if (initHash.startsWith('#category=')) renderDetail(decodeURIComponent(initHash.slice(10)), false);
+    else applyFilter('');
   </script>
 </body>
 </html>

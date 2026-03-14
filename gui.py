@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGroupBox,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -33,12 +32,11 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSpinBox,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
-from app_paths import app_path, get_app_dir
+from app_paths import app_path, get_app_dir, resource_path
 from common import OperationCancelled, ensure_dict, ensure_str_list
 from main import RuntimeHooks, run_report, run_scan, run_stats, run_summarize
 from main import run_sync
@@ -57,6 +55,17 @@ from version import __version__
 CONFIG_PATH = app_path("config.yaml")
 REPORT_PATH = app_path("report.html")
 
+
+def _load_theme() -> str:
+    theme_path = resource_path("theme.qss")
+    if theme_path.exists():
+        return theme_path.read_text(encoding="utf-8")
+    return ""
+
+
+# ---------------------------------------------------------------------------
+#  Workers
+# ---------------------------------------------------------------------------
 
 class UpdateCheckWorker(QThread):
     checked = Signal(object)
@@ -93,6 +102,66 @@ class UpdateDownloadWorker(QThread):
             return
         self.finished_update.emit(str(zip_path), "", False)
 
+
+class CommandWorker(QThread):
+    log = Signal(str)
+    progress = Signal(str, int, int, str)
+    finished_status = Signal(bool, str, bool)
+
+    def __init__(self, args: list[str]) -> None:
+        super().__init__()
+        self.args = args
+        self._cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self._cancel_event.set()
+
+    def run(self) -> None:
+        try:
+            self._dispatch()
+        except OperationCancelled:
+            self.finished_status.emit(False, "任务已取消。", True)
+        except Exception as exc:
+            self.finished_status.emit(False, f"执行失败：{exc}", False)
+        else:
+            self.finished_status.emit(True, "", False)
+
+    def _dispatch(self) -> None:
+        hooks = RuntimeHooks(
+            log=self.log.emit,
+            progress=self.progress.emit,
+            is_cancelled=self._cancel_event.is_set,
+        )
+        if self.args == ["scan"]:
+            run_scan(force=False, hooks=hooks)
+            return
+        if self.args == ["scan", "--force"]:
+            run_scan(force=True, hooks=hooks)
+            return
+        if self.args == ["report"]:
+            run_report(hooks=hooks)
+            return
+        if self.args == ["stats"]:
+            run_stats(hooks=hooks)
+            return
+        if self.args == ["sync"]:
+            run_sync(hooks=hooks)
+            return
+        if self.args == ["summarize", "--all"]:
+            run_summarize(summarize_all=True, hooks=hooks)
+            return
+        if len(self.args) >= 3 and self.args[:2] == ["summarize", "--category"]:
+            run_summarize(category_name=self.args[2], hooks=hooks)
+            return
+        if len(self.args) >= 3 and self.args[:2] == ["summarize", "--file"]:
+            run_summarize(file_path=self.args[2], hooks=hooks)
+            return
+        raise RuntimeError(f"不支持的命令: {' '.join(self.args)}")
+
+
+# ---------------------------------------------------------------------------
+#  Config helpers
+# ---------------------------------------------------------------------------
 
 def default_config() -> dict[str, Any]:
     return {
@@ -217,61 +286,49 @@ def normalize_auto_scan_interval(raw_value: Any) -> int:
     return min(1440, max(15, value))
 
 
-class CommandWorker(QThread):
-    log = Signal(str)
-    progress = Signal(str, int, int, str)
-    finished_status = Signal(bool, str, bool)
+# ---------------------------------------------------------------------------
+#  Collapsible section helper
+# ---------------------------------------------------------------------------
 
-    def __init__(self, args: list[str]) -> None:
-        super().__init__()
-        self.args = args
-        self._cancel_event = threading.Event()
+class CollapsibleSection(QWidget):
+    """A section with a clickable header that toggles content visibility."""
 
-    def cancel(self) -> None:
-        self._cancel_event.set()
+    def __init__(self, title: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
-    def run(self) -> None:
-        try:
-            self._dispatch()
-        except OperationCancelled:
-            self.finished_status.emit(False, "任务已取消。", True)
-        except Exception as exc:
-            self.finished_status.emit(False, f"执行失败：{exc}", False)
-        else:
-            self.finished_status.emit(True, "", False)
+        self._toggle_button = QPushButton(f"▸ {title}")
+        self._toggle_button.setObjectName("sectionToggle")
+        self._toggle_button.setCursor(Qt.PointingHandCursor)
+        self._toggle_button.clicked.connect(self._on_toggle)
+        self._title = title
 
-    def _dispatch(self) -> None:
-        hooks = RuntimeHooks(
-            log=self.log.emit,
-            progress=self.progress.emit,
-            is_cancelled=self._cancel_event.is_set,
-        )
-        if self.args == ["scan"]:
-            run_scan(force=False, hooks=hooks)
-            return
-        if self.args == ["scan", "--force"]:
-            run_scan(force=True, hooks=hooks)
-            return
-        if self.args == ["report"]:
-            run_report(hooks=hooks)
-            return
-        if self.args == ["stats"]:
-            run_stats(hooks=hooks)
-            return
-        if self.args == ["sync"]:
-            run_sync(hooks=hooks)
-            return
-        if self.args == ["summarize", "--all"]:
-            run_summarize(summarize_all=True, hooks=hooks)
-            return
-        if len(self.args) >= 3 and self.args[:2] == ["summarize", "--category"]:
-            run_summarize(category_name=self.args[2], hooks=hooks)
-            return
-        if len(self.args) >= 3 and self.args[:2] == ["summarize", "--file"]:
-            run_summarize(file_path=self.args[2], hooks=hooks)
-            return
-        raise RuntimeError(f"不支持的命令: {' '.join(self.args)}")
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(0, 8, 0, 4)
+        self._content_layout.setSpacing(8)
+        self._content.setVisible(False)
 
+        layout.addWidget(self._toggle_button)
+        layout.addWidget(self._content)
+
+    def content_layout(self) -> QVBoxLayout:
+        return self._content_layout
+
+    def set_expanded(self, expanded: bool) -> None:
+        self._content.setVisible(expanded)
+        arrow = "▾" if expanded else "▸"
+        self._toggle_button.setText(f"{arrow} {self._title}")
+
+    def _on_toggle(self) -> None:
+        self.set_expanded(not self._content.isVisible())
+
+
+# ---------------------------------------------------------------------------
+#  Main window
+# ---------------------------------------------------------------------------
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
@@ -286,7 +343,6 @@ class MainWindow(QMainWindow):
         self.current_total = 0
         self.current_progress = 0
         self.started_at: float | None = None
-        self.metric_value_labels: dict[str, QLabel] = {}
         self.elapsed_timer = QTimer(self)
         self.elapsed_timer.setInterval(1000)
         self.elapsed_timer.timeout.connect(self._refresh_elapsed_time)
@@ -294,236 +350,40 @@ class MainWindow(QMainWindow):
         self.auto_scan_timer.timeout.connect(self._trigger_auto_sync)
 
         self.setWindowTitle(f"文件整理助手 v{__version__}")
-        self.resize(920, 680)
-        self.setMinimumSize(760, 560)
-        self._apply_theme()
+        self.resize(960, 700)
+        self.setMinimumSize(720, 520)
+        self.setStyleSheet(_load_theme())
         self._setup_menu_bar()
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         central = QWidget()
         central.setObjectName("centralSurface")
         root = QVBoxLayout(central)
-        root.setContentsMargins(24, 22, 24, 24)
-        root.setSpacing(16)
+        root.setContentsMargins(20, 16, 20, 20)
+        root.setSpacing(12)
 
-        root.addWidget(self._build_hero_section())
+        # --- Title bar ---
+        root.addWidget(self._build_title_bar())
+        # --- Update banner (hidden by default) ---
         root.addWidget(self._build_update_banner())
-        root.addLayout(self._build_top_area())
-        root.addWidget(self._build_log_area(), stretch=1)
+        # --- Action toolbar ---
+        root.addWidget(self._build_action_toolbar())
+        # --- Status strip ---
+        root.addWidget(self._build_status_strip())
+        # --- Main area: config left, log right ---
+        root.addLayout(self._build_main_area(), stretch=1)
 
         scroll.setWidget(central)
         self.setCentralWidget(scroll)
         self._load_into_form(load_config())
         self.current_command: list[str] = []
         self._update_run_buttons()
-        self._refresh_status_badges()
-        self._apply_responsive_layouts()
         self._start_update_check()
 
-    def _apply_theme(self) -> None:
-        self.setStyleSheet(
-            """
-            QMainWindow {
-                background: #f5efe6;
-            }
-            QWidget#centralSurface {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #f8f2ea, stop:0.55 #f4eee5, stop:1 #efe6db);
-            }
-            QMenuBar {
-                background: rgba(255, 255, 255, 0.72);
-                color: #433129;
-                border: 1px solid rgba(125, 86, 55, 0.18);
-                border-radius: 10px;
-                padding: 6px 10px;
-                spacing: 10px;
-            }
-            QMenuBar::item {
-                padding: 6px 10px;
-                border-radius: 8px;
-                background: transparent;
-            }
-            QMenuBar::item:selected {
-                background: #ead9c9;
-            }
-            QMenu {
-                background: #fffaf5;
-                border: 1px solid #d9c5b3;
-                padding: 8px;
-            }
-            QMenu::item {
-                padding: 8px 14px;
-                border-radius: 8px;
-            }
-            QMenu::item:selected {
-                background: #f0dfcf;
-            }
-            QFrame#heroCard, QFrame#statusCard, QFrame#updateBanner {
-                background: rgba(255, 251, 246, 0.92);
-                border: 1px solid rgba(130, 93, 67, 0.16);
-                border-radius: 18px;
-            }
-            QFrame#heroCard {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #fff7ef, stop:0.6 #f3e4d4, stop:1 #e9d7c3);
-            }
-            QLabel#eyebrow {
-                color: #8b5e3c;
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 1px;
-                text-transform: uppercase;
-            }
-            QLabel#heroTitle {
-                color: #2d211c;
-                font-size: 30px;
-                font-weight: 800;
-            }
-            QLabel#heroSubtitle {
-                color: #6c584d;
-                font-size: 14px;
-                line-height: 1.4;
-            }
-            QLabel#heroBadge {
-                background: rgba(255, 250, 244, 0.88);
-                border: 1px solid rgba(109, 74, 48, 0.14);
-                border-radius: 14px;
-                color: #5a4337;
-                font-weight: 600;
-                padding: 8px 12px;
-            }
-            QGroupBox {
-                color: #3f2f27;
-                font-size: 15px;
-                font-weight: 700;
-                background: rgba(255, 251, 246, 0.9);
-                border: 1px solid rgba(130, 93, 67, 0.16);
-                border-radius: 18px;
-                margin-top: 14px;
-                padding-top: 18px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 16px;
-                padding: 0 8px;
-                color: #7b5439;
-            }
-            QLabel {
-                color: #3f2f27;
-            }
-            QLabel#mutedLabel {
-                color: #6e5c51;
-            }
-            QLabel#statusValue {
-                color: #2a201c;
-                font-size: 18px;
-                font-weight: 800;
-            }
-            QLabel#statusCaption {
-                color: #7a6658;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QLineEdit, QPlainTextEdit, QListWidget, QSpinBox {
-                background: rgba(255, 255, 255, 0.82);
-                border: 1px solid #d9c7b6;
-                border-radius: 12px;
-                padding: 8px 10px;
-                color: #2e241f;
-                selection-background-color: #c57f45;
-            }
-            QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus, QSpinBox:focus {
-                border: 1px solid #bb6f33;
-                background: #fffdfb;
-            }
-            QListWidget {
-                padding: 6px;
-            }
-            QListWidget::item {
-                border-radius: 8px;
-                padding: 7px 8px;
-                margin: 2px 0;
-            }
-            QListWidget::item:selected {
-                background: #f0dfcf;
-                color: #2e241f;
-            }
-            QPushButton {
-                background: #efe0d1;
-                color: #452f24;
-                border: 1px solid rgba(129, 88, 58, 0.18);
-                border-radius: 12px;
-                padding: 10px 14px;
-                font-weight: 700;
-            }
-            QPushButton:hover {
-                background: #e8d5c3;
-            }
-            QPushButton:pressed {
-                background: #dec4ac;
-            }
-            QPushButton:disabled {
-                background: #e8ddd2;
-                color: #a08e81;
-                border-color: rgba(129, 88, 58, 0.1);
-            }
-            QPushButton[role="primary"] {
-                background: #b7652f;
-                color: #fffaf5;
-                border: none;
-            }
-            QPushButton[role="primary"]:hover {
-                background: #a85a28;
-            }
-            QPushButton[role="primary"]:pressed {
-                background: #954d1f;
-            }
-            QPushButton[role="accent"] {
-                background: #2f6c63;
-                color: #f4fbf8;
-                border: none;
-            }
-            QPushButton[role="accent"]:hover {
-                background: #285c55;
-            }
-            QPushButton[role="danger"] {
-                background: #a84c4c;
-                color: #fff8f6;
-                border: none;
-            }
-            QPushButton[role="danger"]:hover {
-                background: #963f3f;
-            }
-            QCheckBox, QRadioButton {
-                color: #4a3931;
-                spacing: 8px;
-            }
-            QProgressBar {
-                min-height: 16px;
-                border-radius: 8px;
-                background: #eadccd;
-                border: none;
-                text-align: center;
-                color: #4a3931;
-                font-weight: 700;
-            }
-            QProgressBar::chunk {
-                border-radius: 8px;
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #b8662f, stop:1 #d49a59);
-            }
-            QPlainTextEdit {
-                background: #fffdf9;
-                font-family: Menlo, Monaco, monospace;
-                font-size: 12px;
-            }
-            """
-        )
+    # ── Menu bar ──────────────────────────────────────────────────────
 
     def _setup_menu_bar(self) -> None:
         help_menu = self.menuBar().addMenu("帮助")
@@ -536,87 +396,55 @@ class MainWindow(QMainWindow):
         check_update_action.triggered.connect(self._check_for_updates_manually)
         help_menu.addAction(check_update_action)
 
-    def _build_hero_section(self) -> QFrame:
-        card = QFrame()
-        card.setObjectName("heroCard")
-        layout = QBoxLayout(QBoxLayout.LeftToRight, card)
-        self.hero_layout = layout
-        layout.setContentsMargins(22, 18, 22, 18)
-        layout.setSpacing(18)
+        tools_menu = self.menuBar().addMenu("工具")
 
-        text_column = QVBoxLayout()
-        text_column.setSpacing(6)
+        force_scan_action = QAction("强制重新扫描", self)
+        force_scan_action.triggered.connect(lambda: self._run_command(["scan", "--force"]))
+        tools_menu.addAction(force_scan_action)
 
-        eyebrow = QLabel("桌面整理工作台")
-        eyebrow.setObjectName("eyebrow")
+        refresh_report_action = QAction("刷新报告", self)
+        refresh_report_action.triggered.connect(lambda: self._run_command(["report"]))
+        tools_menu.addAction(refresh_report_action)
+
+        stats_action = QAction("查看缓存统计", self)
+        stats_action.triggered.connect(lambda: self._run_command(["stats"]))
+        tools_menu.addAction(stats_action)
+
+    # ── Title bar (replaces hero) ─────────────────────────────────────
+
+    def _build_title_bar(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("toolbarFrame")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(20, 14, 20, 14)
+        layout.setSpacing(12)
+
         title = QLabel("文件整理助手")
-        title.setObjectName("heroTitle")
-        subtitle = QLabel("把扫描、分类、摘要和报告放在一个桌面工作台里。先配置，再开始巡检。")
-        subtitle.setObjectName("heroSubtitle")
-        subtitle.setWordWrap(True)
+        title.setStyleSheet("font-size: 20px; font-weight: 800; color: #1c1917;")
 
-        badge_row = QHBoxLayout()
-        badge_row.setSpacing(10)
-        for text in [f"v{__version__}", "本地优先", "HTML 报告"]:
-            badge = QLabel(text)
-            badge.setObjectName("heroBadge")
-            badge_row.addWidget(badge)
-        badge_row.addStretch(1)
+        version_badge = QLabel(f"v{__version__}")
+        version_badge.setStyleSheet(
+            "background: #fef3c7; color: #92400e; font-size: 11px; font-weight: 700;"
+            " padding: 3px 8px; border-radius: 6px;"
+        )
 
-        text_column.addWidget(eyebrow)
-        text_column.addWidget(title)
-        text_column.addWidget(subtitle)
-        text_column.addLayout(badge_row)
+        layout.addWidget(title)
+        layout.addWidget(version_badge)
+        layout.addStretch(1)
 
-        summary_column = QVBoxLayout()
-        summary_column.setSpacing(10)
-        (
-            self.hero_status_tile,
-            self.hero_status_value,
-            self.hero_status_caption,
-        ) = self._create_status_tile("当前状态", "空闲", "准备开始")
-        (
-            self.hero_phase_tile,
-            self.hero_phase_value,
-            self.hero_phase_caption,
-        ) = self._create_status_tile("最近动作", "等待中", "尚未开始任务")
-        summary_column.addWidget(self.hero_status_tile, stretch=1)
-        summary_column.addWidget(self.hero_phase_tile, stretch=1)
+        return frame
 
-        layout.addLayout(text_column, stretch=3)
-        layout.addLayout(summary_column, stretch=2)
-        return card
-
-    def _create_status_tile(self, title: str, value: str, caption: str) -> tuple[QFrame, QLabel, QLabel]:
-        card = QFrame()
-        card.setObjectName("statusCard")
-        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(4)
-
-        heading = QLabel(title)
-        heading.setObjectName("statusCaption")
-        heading.setProperty("class", "caption")
-        value_label = QLabel(value)
-        value_label.setObjectName("statusValue")
-        caption_label = QLabel(caption)
-        caption_label.setObjectName("statusCaption")
-
-        layout.addWidget(heading)
-        layout.addWidget(value_label)
-        layout.addWidget(caption_label)
-        return card, value_label, caption_label
+    # ── Update banner ─────────────────────────────────────────────────
 
     def _build_update_banner(self) -> QFrame:
         self.update_banner = QFrame()
         self.update_banner.setObjectName("updateBanner")
         layout = QHBoxLayout(self.update_banner)
-        layout.setContentsMargins(18, 12, 18, 12)
+        layout.setContentsMargins(16, 10, 16, 10)
         self.update_label = QLabel("发现新版本")
-        self.update_label.setStyleSheet("font-weight: 700; color: #214e67;")
+        self.update_label.setStyleSheet("font-weight: 700; color: #1d4ed8;")
         self.update_now_button = QPushButton("立即更新")
-        self.update_now_button.setProperty("role", "primary")
+        self.update_now_button.setProperty("role", "accent")
         self.update_now_button.clicked.connect(self._handle_update_now)
         self.update_ignore_button = QPushButton("忽略")
         self.update_ignore_button.clicked.connect(self._ignore_current_update)
@@ -626,130 +454,194 @@ class MainWindow(QMainWindow):
         self.update_banner.hide()
         return self.update_banner
 
-    def _build_top_area(self) -> QHBoxLayout:
+    # ── Action toolbar ────────────────────────────────────────────────
+
+    def _build_action_toolbar(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("toolbarFrame")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(10)
+
+        self.sync_button = QPushButton("开始巡检")
+        self.sync_button.setProperty("role", "primary")
+        self.sync_button.setMinimumWidth(120)
+        self.sync_button.clicked.connect(lambda: self._run_command(["sync"]))
+
+        self.scan_button = QPushButton("仅扫描分类")
+        self.scan_button.clicked.connect(lambda: self._run_command(["scan"]))
+
+        self.open_report_button = QPushButton("打开报告")
+        self.open_report_button.setProperty("role", "accent")
+        self.open_report_button.clicked.connect(self._open_report)
+
+        self.cancel_button = QPushButton("取消")
+        self.cancel_button.setProperty("role", "danger")
+        self.cancel_button.clicked.connect(self._cancel_running_task)
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.setVisible(False)
+
+        self.auto_scan_checkbox = QCheckBox("自动巡检")
+        self.auto_scan_checkbox.toggled.connect(lambda _: self._sync_auto_scan_timer())
+        self.auto_scan_interval_input = QSpinBox()
+        self.auto_scan_interval_input.setRange(15, 1440)
+        self.auto_scan_interval_input.setSuffix(" 分钟")
+        self.auto_scan_interval_input.setFixedWidth(100)
+        self.auto_scan_interval_input.valueChanged.connect(lambda _: self._sync_auto_scan_timer())
+
+        layout.addWidget(self.sync_button)
+        layout.addWidget(self.scan_button)
+        layout.addWidget(self.open_report_button)
+        layout.addWidget(self.cancel_button)
+        layout.addStretch(1)
+        layout.addWidget(self.auto_scan_checkbox)
+        layout.addWidget(self.auto_scan_interval_input)
+
+        return frame
+
+    # ── Status strip ──────────────────────────────────────────────────
+
+    def _build_status_strip(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("statusStrip")
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(16, 8, 16, 8)
+        layout.setSpacing(16)
+
+        self._status_value = QLabel("空闲")
+        self._status_value.setObjectName("statusStripValue")
+        self._phase_value = QLabel("等待开始")
+        self._phase_value.setObjectName("statusStripLabel")
+        self._elapsed_value = QLabel("00:00")
+        self._elapsed_value.setObjectName("statusStripLabel")
+        self._progress_value = QLabel("—")
+        self._progress_value.setObjectName("statusStripLabel")
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 1)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat("")
+        self.progress_bar.setFixedWidth(160)
+        self.progress_bar.setFixedHeight(14)
+
+        layout.addWidget(self._status_value)
+        layout.addWidget(self._make_separator())
+        layout.addWidget(self._phase_value)
+        layout.addWidget(self._make_separator())
+        layout.addWidget(self._elapsed_value)
+        layout.addWidget(self._make_separator())
+        layout.addWidget(self._progress_value)
+        layout.addStretch(1)
+        layout.addWidget(self.progress_bar)
+
+        return frame
+
+    @staticmethod
+    def _make_separator() -> QLabel:
+        sep = QLabel("·")
+        sep.setStyleSheet("color: #d6d3d1; font-size: 16px;")
+        return sep
+
+    # ── Main area ─────────────────────────────────────────────────────
+
+    def _build_main_area(self) -> QHBoxLayout:
         layout = QBoxLayout(QBoxLayout.LeftToRight)
-        self.top_area_layout = layout
-        layout.setSpacing(14)
-        layout.addWidget(self._build_config_panel(), stretch=3)
-        layout.addWidget(self._build_action_panel(), stretch=2)
+        self._main_area_layout = layout
+        layout.setSpacing(12)
+        layout.addWidget(self._build_config_panel(), stretch=2)
+        layout.addWidget(self._build_log_panel(), stretch=3)
         return layout
+
+    # ── Config panel (with collapsible sections) ──────────────────────
 
     def _build_config_panel(self) -> QGroupBox:
         box = QGroupBox("配置")
-        layout = QVBoxLayout(box)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
-        form = QFormLayout()
-        form.setSpacing(10)
-        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        outer = QVBoxLayout(box)
+        outer.setContentsMargins(14, 14, 14, 14)
+        outer.setSpacing(4)
+
+        # -- LLM section (expanded by default) --
+        llm_section = CollapsibleSection("LLM 模型设置")
+        llm_form = QFormLayout()
+        llm_form.setSpacing(8)
+        llm_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
         self.provider_input = QLineEdit()
         self.provider_input.setPlaceholderText("openai / anthropic")
         self.api_key_input = QLineEdit()
         self.api_key_input.setEchoMode(QLineEdit.Password)
-        self.api_key_input.setPlaceholderText("优先读取环境变量，也可直接填写")
+        self.api_key_input.setPlaceholderText("优先读取环境变量")
         self.model_input = QLineEdit()
         self.summary_model_input = QLineEdit()
         self.base_url_input = QLineEdit()
-        self.base_url_input.setPlaceholderText("留空使用官方 API 地址")
-        self.batch_size_input = QSpinBox()
-        self.batch_size_input.setRange(10, 100)
-        self.classification_workers_input = QSpinBox()
-        self.classification_workers_input.setRange(1, 4)
-        self.summary_workers_input = QSpinBox()
-        self.summary_workers_input.setRange(1, 8)
-        self.auto_scan_checkbox = QCheckBox("开启每小时自动巡检")
-        self.auto_scan_checkbox.toggled.connect(lambda _: self._sync_auto_scan_timer())
-        self.auto_scan_interval_input = QSpinBox()
-        self.auto_scan_interval_input.setRange(15, 1440)
-        self.auto_scan_interval_input.setSuffix(" 分钟")
-        self.auto_scan_interval_input.valueChanged.connect(lambda _: self._sync_auto_scan_timer())
+        self.base_url_input.setPlaceholderText("留空使用官方地址")
 
-        form.addRow("服务商", self.provider_input)
-        form.addRow("API Key", self.api_key_input)
-        form.addRow("分类模型", self.model_input)
-        form.addRow("摘要模型", self.summary_model_input)
-        form.addRow("Base URL", self.base_url_input)
-        form.addRow("批次大小", self.batch_size_input)
-        form.addRow("分类并发", self.classification_workers_input)
-        form.addRow("摘要并发", self.summary_workers_input)
-        form.addRow("自动巡检", self.auto_scan_checkbox)
-        form.addRow("巡检间隔", self.auto_scan_interval_input)
-        layout.addLayout(form)
+        llm_form.addRow("服务商", self.provider_input)
+        llm_form.addRow("API Key", self.api_key_input)
+        llm_form.addRow("分类模型", self.model_input)
+        llm_form.addRow("摘要模型", self.summary_model_input)
+        llm_form.addRow("Base URL", self.base_url_input)
+        llm_section.content_layout().addLayout(llm_form)
+        llm_section.set_expanded(True)
 
-        path_row = QHBoxLayout()
-        self.path_list = QListWidget()
-        add_path_button = QPushButton("添加扫描目录")
-        add_path_button.clicked.connect(self._add_scan_path)
-        remove_path_button = QPushButton("移除选中目录")
-        remove_path_button.clicked.connect(self._remove_selected_path)
-        path_buttons = QVBoxLayout()
-        path_buttons.addWidget(add_path_button)
-        path_buttons.addWidget(remove_path_button)
-        path_buttons.addStretch(1)
-        path_row.addWidget(self.path_list, stretch=1)
-        path_row.addLayout(path_buttons)
-
-        self.exclude_input = QPlainTextEdit()
-        self.exclude_input.setPlaceholderText("每行一个排除目录名，例如 node_modules")
-        self.exclude_input.setFixedHeight(120)
-
-        save_button = QPushButton("保存配置")
-        save_button.setProperty("role", "primary")
-        save_button.clicked.connect(self._save_form_config)
-
-        helper = QLabel("建议先确认模型与扫描范围，再开始巡检。默认目录可单独勾选或取消。")
-        helper.setObjectName("mutedLabel")
-        helper.setWordWrap(True)
-        layout.addWidget(helper)
-        layout.addWidget(QLabel("额外扫描目录"))
-        default_path_box = QGroupBox("默认扫描目录")
-        default_path_layout = QVBoxLayout(default_path_box)
-        default_path_layout.setContentsMargins(14, 16, 14, 12)
+        # -- Scan paths section --
+        scan_section = CollapsibleSection("扫描范围")
         self.scan_desktop_checkbox = QCheckBox("Desktop")
         self.scan_documents_checkbox = QCheckBox("Documents")
         self.scan_downloads_checkbox = QCheckBox("Downloads")
         self.scan_desktop_checkbox.setChecked(True)
         self.scan_documents_checkbox.setChecked(True)
         self.scan_downloads_checkbox.setChecked(True)
-        default_path_layout.addWidget(self.scan_desktop_checkbox)
-        default_path_layout.addWidget(self.scan_documents_checkbox)
-        default_path_layout.addWidget(self.scan_downloads_checkbox)
-        layout.addWidget(default_path_box)
-        layout.addLayout(path_row)
-        layout.addWidget(QLabel("排除目录名"))
-        layout.addWidget(self.exclude_input)
-        layout.addWidget(save_button, alignment=Qt.AlignRight)
-        return box
+        defaults_row = QHBoxLayout()
+        defaults_row.setSpacing(16)
+        defaults_row.addWidget(self.scan_desktop_checkbox)
+        defaults_row.addWidget(self.scan_documents_checkbox)
+        defaults_row.addWidget(self.scan_downloads_checkbox)
+        defaults_row.addStretch(1)
+        scan_section.content_layout().addLayout(defaults_row)
 
-    def _build_action_panel(self) -> QGroupBox:
-        box = QGroupBox("操作")
-        layout = QVBoxLayout(box)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(10)
+        extra_label = QLabel("额外扫描目录")
+        extra_label.setObjectName("mutedLabel")
+        scan_section.content_layout().addWidget(extra_label)
+        self.path_list = QListWidget()
+        self.path_list.setMaximumHeight(100)
+        path_buttons = QHBoxLayout()
+        add_path_button = QPushButton("添加目录")
+        add_path_button.clicked.connect(self._add_scan_path)
+        remove_path_button = QPushButton("移除选中")
+        remove_path_button.clicked.connect(self._remove_selected_path)
+        path_buttons.addWidget(add_path_button)
+        path_buttons.addWidget(remove_path_button)
+        path_buttons.addStretch(1)
+        scan_section.content_layout().addWidget(self.path_list)
+        scan_section.content_layout().addLayout(path_buttons)
 
-        self.scan_button = QPushButton("开始扫描并分类")
-        self.scan_button.setProperty("role", "primary")
-        self.scan_button.clicked.connect(lambda: self._run_command(["scan"]))
-        self.force_scan_button = QPushButton("强制重新扫描")
-        self.force_scan_button.clicked.connect(lambda: self._run_command(["scan", "--force"]))
-        self.report_button = QPushButton("刷新报告")
-        self.report_button.clicked.connect(lambda: self._run_command(["report"]))
-        self.open_report_button = QPushButton("打开 HTML 报告")
-        self.open_report_button.setProperty("role", "accent")
-        self.open_report_button.clicked.connect(self._open_report)
-        self.stats_button = QPushButton("查看缓存统计")
-        self.stats_button.clicked.connect(lambda: self._run_command(["stats"]))
-        self.sync_button = QPushButton("增量巡检并刷新报告")
-        self.sync_button.setProperty("role", "accent")
-        self.sync_button.clicked.connect(lambda: self._run_command(["sync"]))
-        self.cancel_button = QPushButton("取消当前任务")
-        self.cancel_button.setProperty("role", "danger")
-        self.cancel_button.clicked.connect(self._cancel_running_task)
-        self.cancel_button.setEnabled(False)
+        exclude_label = QLabel("排除目录名")
+        exclude_label.setObjectName("mutedLabel")
+        scan_section.content_layout().addWidget(exclude_label)
+        self.exclude_input = QPlainTextEdit()
+        self.exclude_input.setPlaceholderText("每行一个，例如 node_modules")
+        self.exclude_input.setMaximumHeight(80)
+        scan_section.content_layout().addWidget(self.exclude_input)
+        scan_section.set_expanded(True)
 
-        summarize_box = QGroupBox("摘要")
-        summarize_layout = QVBoxLayout(summarize_box)
+        # -- Performance section (collapsed by default) --
+        perf_section = CollapsibleSection("性能参数")
+        perf_form = QFormLayout()
+        perf_form.setSpacing(8)
+        self.batch_size_input = QSpinBox()
+        self.batch_size_input.setRange(10, 100)
+        self.classification_workers_input = QSpinBox()
+        self.classification_workers_input.setRange(1, 4)
+        self.summary_workers_input = QSpinBox()
+        self.summary_workers_input.setRange(1, 8)
+        perf_form.addRow("批次大小", self.batch_size_input)
+        perf_form.addRow("分类并发", self.classification_workers_input)
+        perf_form.addRow("摘要并发", self.summary_workers_input)
+        perf_section.content_layout().addLayout(perf_form)
+
+        # -- Summarize section (collapsed by default) --
+        summary_section = CollapsibleSection("摘要生成")
         self.summary_file_radio = QRadioButton("按单个文件")
         self.summary_category_radio = QRadioButton("按分类")
         self.summary_all_radio = QRadioButton("全部已分类文件")
@@ -757,88 +649,61 @@ class MainWindow(QMainWindow):
 
         self.summary_file_input = QLineEdit()
         self.summary_file_input.setPlaceholderText("选择一个文件")
-        choose_file_button = QPushButton("选择文件")
+        choose_file_button = QPushButton("选择")
         choose_file_button.clicked.connect(self._choose_summary_file)
         file_row = QHBoxLayout()
         file_row.addWidget(self.summary_file_input, stretch=1)
         file_row.addWidget(choose_file_button)
 
         self.summary_category_input = QLineEdit()
-        self.summary_category_input.setPlaceholderText("输入分类名称，例如 财务/税务")
+        self.summary_category_input.setPlaceholderText("分类名称，例如 财务/税务")
 
         self.run_summary_button = QPushButton("生成摘要")
         self.run_summary_button.setProperty("role", "primary")
         self.run_summary_button.clicked.connect(self._run_summary_command)
 
-        summarize_layout.addWidget(self.summary_file_radio)
-        summarize_layout.addLayout(file_row)
-        summarize_layout.addWidget(self.summary_category_radio)
-        summarize_layout.addWidget(self.summary_category_input)
-        summarize_layout.addWidget(self.summary_all_radio)
-        summarize_layout.addWidget(self.run_summary_button)
+        summary_section.content_layout().addWidget(self.summary_file_radio)
+        summary_section.content_layout().addLayout(file_row)
+        summary_section.content_layout().addWidget(self.summary_category_radio)
+        summary_section.content_layout().addWidget(self.summary_category_input)
+        summary_section.content_layout().addWidget(self.summary_all_radio)
+        summary_section.content_layout().addWidget(self.run_summary_button)
 
-        layout.addWidget(self.scan_button)
-        layout.addWidget(self.force_scan_button)
-        layout.addWidget(self.report_button)
-        layout.addWidget(self.open_report_button)
-        layout.addWidget(self.stats_button)
-        layout.addWidget(self.sync_button)
-        layout.addWidget(self.cancel_button)
-        layout.addWidget(summarize_box)
-        layout.addStretch(1)
+        # -- Save button --
+        save_button = QPushButton("保存配置")
+        save_button.setProperty("role", "primary")
+        save_button.clicked.connect(self._save_form_config)
+
+        outer.addWidget(llm_section)
+        outer.addWidget(scan_section)
+        outer.addWidget(perf_section)
+        outer.addWidget(summary_section)
+        outer.addStretch(1)
+        outer.addWidget(save_button)
+
         return box
 
-    def _build_log_area(self) -> QGroupBox:
+    # ── Log panel ─────────────────────────────────────────────────────
+
+    def _build_log_panel(self) -> QGroupBox:
         box = QGroupBox("运行日志")
         layout = QVBoxLayout(box)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(8)
 
-        status_row = QGridLayout()
-        status_row.setHorizontalSpacing(10)
-        status_row.setVerticalSpacing(10)
-        self.status_label = self._create_metric_card("status", "状态", "空闲")
-        self.phase_label = self._create_metric_card("phase", "阶段", "等待开始")
-        self.elapsed_label = self._create_metric_card("elapsed", "耗时", "00:00")
-        self.progress_detail_label = self._create_metric_card("progress", "进度", "未开始")
-        status_row.addWidget(self.status_label, 0, 0)
-        status_row.addWidget(self.phase_label, 0, 1)
-        status_row.addWidget(self.elapsed_label, 1, 0)
-        status_row.addWidget(self.progress_detail_label, 1, 1)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 1)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat("未开始")
         self.log_output = QPlainTextEdit()
+        self.log_output.setObjectName("logOutput")
         self.log_output.setReadOnly(True)
         self.log_output.setPlaceholderText("运行输出会显示在这里。")
+
         clear_button = QPushButton("清空日志")
         clear_button.clicked.connect(self.log_output.clear)
 
-        layout.addLayout(status_row)
-        layout.addWidget(self.progress_bar)
         layout.addWidget(self.log_output, stretch=1)
         layout.addWidget(clear_button, alignment=Qt.AlignRight)
         return box
 
-    def _create_metric_card(self, key: str, title: str, value: str) -> QFrame:
-        card = QFrame()
-        card.setObjectName("statusCard")
-        card.setMinimumHeight(76)
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(2)
-
-        title_label = QLabel(title)
-        title_label.setObjectName("statusCaption")
-        value_label = QLabel(value)
-        value_label.setObjectName("statusValue")
-
-        layout.addWidget(title_label)
-        layout.addWidget(value_label)
-        self.metric_value_labels[key] = value_label
-        return card
+    # ── Config load / save ────────────────────────────────────────────
 
     def _load_into_form(self, config: dict[str, Any]) -> None:
         llm = ensure_dict(config.get("llm", {}))
@@ -924,6 +789,8 @@ class MainWindow(QMainWindow):
         self._append_log("运行前已保存当前配置。")
         return True
 
+    # ── Path / file pickers ───────────────────────────────────────────
+
     def _add_scan_path(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "选择需要扫描的目录")
         if not directory:
@@ -943,11 +810,12 @@ class MainWindow(QMainWindow):
             self.summary_file_input.setText(file_path)
             self.summary_file_radio.setChecked(True)
 
+    # ── Run commands ──────────────────────────────────────────────────
+
     def _run_summary_command(self) -> None:
         if self.summary_all_radio.isChecked():
             self._run_command(["summarize", "--all"])
             return
-
         if self.summary_category_radio.isChecked():
             category = self.summary_category_input.text().strip()
             if not category:
@@ -955,7 +823,6 @@ class MainWindow(QMainWindow):
                 return
             self._run_command(["summarize", "--category", category])
             return
-
         file_path = self.summary_file_input.text().strip()
         if not file_path:
             QMessageBox.warning(self, "缺少文件", "请先选择一个文件。")
@@ -975,13 +842,13 @@ class MainWindow(QMainWindow):
         self.current_total = 0
         self.current_progress = 0
         self.started_at = time.monotonic()
-        self.log_output.clear()
-        self._set_status_metrics(
-            status=f"运行中：{' '.join(args)}",
-            phase="任务已启动",
-            elapsed="00:00",
-            progress="准备中",
-        )
+        # Insert separator instead of clearing log
+        if self.log_output.toPlainText().strip():
+            timestamp = time.strftime("%H:%M:%S")
+            self._append_log(f"\n{'─' * 40}")
+            self._append_log(f"  {' '.join(args)} @ {timestamp}")
+            self._append_log(f"{'─' * 40}")
+        self._set_status("运行中", f"{' '.join(args)}", "00:00", "准备中")
         self._set_busy_progress()
         self.elapsed_timer.start()
         self._append_log(f"开始执行：{' '.join(args)}")
@@ -997,15 +864,15 @@ class MainWindow(QMainWindow):
         self.elapsed_timer.stop()
         self._refresh_elapsed_time()
         self.worker = None
-        self._set_status_metrics(
-            status="已完成" if success else ("已取消" if cancelled else "执行失败"),
-            phase="任务完成" if success else ("任务已取消" if cancelled else "任务失败"),
-        )
+        status = "已完成" if success else ("已取消" if cancelled else "执行失败")
+        phase = "任务完成" if success else ("任务已取消" if cancelled else "任务失败")
+        self._status_value.setText(status)
+        self._phase_value.setText(phase)
         if self.current_total:
-            final_progress = self.current_total if success else self.current_progress
-            self._set_metric_value("progress", f"{final_progress}/{self.current_total}")
+            final = self.current_total if success else self.current_progress
+            self._progress_value.setText(f"{final}/{self.current_total}")
         else:
-            self._set_metric_value("progress", "已完成" if success else ("已取消" if cancelled else "已中断"))
+            self._progress_value.setText("已完成" if success else ("已取消" if cancelled else "已中断"))
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100 if success else 0)
         self.progress_bar.setFormat("完成" if success else ("已取消" if cancelled else "失败"))
@@ -1017,16 +884,19 @@ class MainWindow(QMainWindow):
 
     def _update_run_buttons(self, running: bool = False) -> None:
         enabled = not running
-        for button in [
-            self.scan_button,
-            self.force_scan_button,
-            self.report_button,
-            self.stats_button,
-            self.sync_button,
-            self.run_summary_button,
-        ]:
-            button.setEnabled(enabled)
+        self.sync_button.setEnabled(enabled)
+        self.scan_button.setEnabled(enabled)
+        self.run_summary_button.setEnabled(enabled)
         self.cancel_button.setEnabled(running)
+        self.cancel_button.setVisible(running)
+
+    def _set_status(self, status: str, phase: str, elapsed: str, progress: str) -> None:
+        self._status_value.setText(status)
+        self._phase_value.setText(phase)
+        self._elapsed_value.setText(elapsed)
+        self._progress_value.setText(progress)
+
+    # ── Update logic ──────────────────────────────────────────────────
 
     def _start_update_check(self, *, manual: bool = False) -> None:
         if self.update_check_worker and self.update_check_worker.isRunning():
@@ -1047,19 +917,11 @@ class MainWindow(QMainWindow):
         self.update_check_worker = None
         if not isinstance(update_info, UpdateCheckResult):
             if manual:
-                QMessageBox.information(
-                    self,
-                    "检查更新",
-                    "当前未发现可用更新，或暂时无法连接更新服务器。",
-                )
+                QMessageBox.information(self, "检查更新", "当前未发现可用更新，或暂时无法连接更新服务器。")
             return
         if update_info.info is None:
             if manual:
-                QMessageBox.information(
-                    self,
-                    "检查更新",
-                    update_info.reason or "当前未发现可用更新。",
-                )
+                QMessageBox.information(self, "检查更新", update_info.reason or "当前未发现可用更新。")
             return
         if self.ignored_update_version == update_info.info.version:
             if manual:
@@ -1067,29 +929,22 @@ class MainWindow(QMainWindow):
                 self.available_update = update_info.info
                 self.update_label.setText(f"发现新版本 v{update_info.info.version}，点击更新")
                 self.update_banner.show()
-                self._refresh_status_badges()
                 QMessageBox.information(
-                    self,
-                    "检查更新",
-                    f"已重新显示新版本 v{update_info.info.version} 的更新提示。",
+                    self, "检查更新", f"已重新显示新版本 v{update_info.info.version} 的更新提示。"
                 )
             return
         self.available_update = update_info.info
         self.update_label.setText(f"发现新版本 v{update_info.info.version}，点击更新")
         self.update_banner.show()
-        self._refresh_status_badges()
         if manual:
             QMessageBox.information(
-                self,
-                "检查更新",
-                f"发现新版本 v{update_info.info.version}，可通过顶部提示条立即更新。",
+                self, "检查更新", f"发现新版本 v{update_info.info.version}，可通过顶部提示条立即更新。"
             )
 
     def _ignore_current_update(self) -> None:
         if self.available_update is not None:
             self.ignored_update_version = self.available_update.version
         self.update_banner.hide()
-        self._refresh_status_badges()
 
     def _handle_update_now(self) -> None:
         if self.available_update is None:
@@ -1144,23 +999,22 @@ class MainWindow(QMainWindow):
         if not zip_path:
             return
         reply = QMessageBox.question(
-            self,
-            "更新已下载",
-            "更新将在重启后生效，是否立即重启？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
+            self, "更新已下载", "更新将在重启后生效，是否立即重启？",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
         )
         if reply != QMessageBox.Yes:
             return
         apply_update(Path(zip_path), get_app_dir())
         QApplication.quit()
 
+    # ── Task control ──────────────────────────────────────────────────
+
     def _cancel_running_task(self) -> None:
         if not self.worker or not self.worker.isRunning():
             return
         self.worker.cancel()
         self._append_log("已请求取消当前任务，正在等待当前步骤安全结束...")
-        self._set_status_metrics(phase="正在取消任务...")
+        self._phase_value.setText("正在取消...")
         self.cancel_button.setEnabled(False)
 
     def _open_report(self) -> None:
@@ -1173,10 +1027,10 @@ class MainWindow(QMainWindow):
         if webbrowser.open(report_url.toString()):
             return
         QMessageBox.warning(
-            self,
-            "打开失败",
-            f"无法自动打开 HTML 报告，请手动打开：\n{REPORT_PATH.resolve()}",
+            self, "打开失败", f"无法自动打开 HTML 报告，请手动打开：\n{REPORT_PATH.resolve()}"
         )
+
+    # ── Log / progress helpers ────────────────────────────────────────
 
     def _append_log(self, message: str) -> None:
         self.log_output.appendPlainText(message)
@@ -1186,106 +1040,79 @@ class MainWindow(QMainWindow):
 
     def _set_busy_progress(self) -> None:
         self.progress_bar.setRange(0, 0)
-        self.progress_bar.setFormat("处理中...")
+        self.progress_bar.setFormat("")
 
     def _apply_progress_update(self, phase: str, current: int, total: int, detail: str) -> None:
         if phase == "scan":
-            self._set_status_metrics(phase=detail or "正在扫描目录...")
+            self._phase_value.setText(detail or "正在扫描目录...")
             self._set_busy_progress()
             return
         if phase == "classify":
             self.current_progress = current
             self.current_total = total
-            value = int(current * 100 / total) if total else 0
+            pct = int(current * 100 / total) if total else 0
             self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(value)
+            self.progress_bar.setValue(pct)
             self.progress_bar.setFormat(f"{current}/{total}")
-            self._set_status_metrics(progress=f"{current}/{total}", phase=detail or "正在调用模型进行分类...")
+            self._progress_value.setText(f"{current}/{total}")
+            self._phase_value.setText(detail or "正在分类...")
             return
         if phase == "summarize":
             self.current_progress = current
             self.current_total = total
-            value = int(current * 100 / total) if total else 0
+            pct = int(current * 100 / total) if total else 0
             self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(value)
+            self.progress_bar.setValue(pct)
             self.progress_bar.setFormat(f"{current}/{total}")
-            self._set_status_metrics(progress=f"{current}/{total}", phase=detail or "正在生成摘要...")
+            self._progress_value.setText(f"{current}/{total}")
+            self._phase_value.setText(detail or "正在生成摘要...")
             return
         if phase == "report":
-            self._set_status_metrics(phase=detail or "正在生成报告...")
+            self._phase_value.setText(detail or "正在生成报告...")
             self._set_busy_progress()
             return
         if phase == "stats":
-            self._set_status_metrics(phase=detail or "正在读取缓存统计...")
+            self._phase_value.setText(detail or "正在读取统计...")
             self._set_busy_progress()
             return
         if phase == "done":
-            self._set_status_metrics(phase=detail or "任务完成")
-
-    def _refresh_status_badges(self) -> None:
-        self.hero_status_value.setText(self.metric_value_labels["status"].text())
-        self.hero_status_caption.setText("有新版本可用" if self.update_banner.isVisible() else "当前未挂起更新")
-        self.hero_phase_value.setText("自动巡检开启" if self.auto_scan_checkbox.isChecked() else "手动模式")
-        self.hero_phase_caption.setText(self.metric_value_labels["phase"].text())
-
-    def _set_metric_value(self, key: str, value: str) -> None:
-        self.metric_value_labels[key].setText(value)
-
-    def _set_status_metrics(
-        self,
-        *,
-        status: str | None = None,
-        phase: str | None = None,
-        elapsed: str | None = None,
-        progress: str | None = None,
-    ) -> None:
-        if status is not None:
-            self._set_metric_value("status", status)
-        if phase is not None:
-            self._set_metric_value("phase", phase)
-        if elapsed is not None:
-            self._set_metric_value("elapsed", elapsed)
-        if progress is not None:
-            self._set_metric_value("progress", progress)
-        self._refresh_status_badges()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._apply_responsive_layouts()
-
-    def _apply_responsive_layouts(self) -> None:
-        width = self.width()
-        self.hero_layout.setDirection(QBoxLayout.TopToBottom if width < 980 else QBoxLayout.LeftToRight)
-        self.top_area_layout.setDirection(QBoxLayout.TopToBottom if width < 1080 else QBoxLayout.LeftToRight)
+            self._phase_value.setText(detail or "任务完成")
 
     def _refresh_elapsed_time(self) -> None:
         if self.started_at is None:
-            self._set_metric_value("elapsed", "00:00")
+            self._elapsed_value.setText("00:00")
             return
         seconds = max(0, int(time.monotonic() - self.started_at))
         minutes, remaining = divmod(seconds, 60)
         hours, minutes = divmod(minutes, 60)
         if hours:
-            self._set_metric_value("elapsed", f"{hours:02d}:{minutes:02d}:{remaining:02d}")
-            return
-        self._set_metric_value("elapsed", f"{minutes:02d}:{remaining:02d}")
+            self._elapsed_value.setText(f"{hours:02d}:{minutes:02d}:{remaining:02d}")
+        else:
+            self._elapsed_value.setText(f"{minutes:02d}:{remaining:02d}")
 
     def _sync_auto_scan_timer(self) -> None:
         if not self.auto_scan_checkbox.isChecked():
             self.auto_scan_timer.stop()
-            self._refresh_status_badges()
             return
         interval_ms = self.auto_scan_interval_input.value() * 60 * 1000
         self.auto_scan_timer.start(interval_ms)
-        self._refresh_status_badges()
 
     def _trigger_auto_sync(self) -> None:
         if self.worker and self.worker.isRunning():
             return
         self._append_log(
-            f"自动巡检触发：每 {self.auto_scan_interval_input.value()} 分钟执行一次增量扫描、摘要与报告刷新。"
+            f"自动巡检触发：每 {self.auto_scan_interval_input.value()} 分钟执行一次增量扫描与报告刷新。"
         )
         self._run_command(["sync"])
+
+    # ── Responsive ────────────────────────────────────────────────────
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        width = self.width()
+        self._main_area_layout.setDirection(
+            QBoxLayout.TopToBottom if width < 900 else QBoxLayout.LeftToRight
+        )
 
 
 def run_gui() -> int:

@@ -5,7 +5,7 @@ from pathlib import Path
 project_root = Path.cwd()
 
 datas = []
-for filename in ["report_template.html", "README.md"]:
+for filename in ["report_template.html", "theme.qss", "README.md"]:
     path = project_root / filename
     if path.exists():
         datas.append((str(path), "."))

@@ -1,0 +1,288 @@
+/* ═══════════════════════════════════════════════════
+   文件整理助手 — 统一主题 (纸与墨)
+   色板：
+     背景    #f7f5f2
+     卡片    #ffffff
+     主墨    #1c1917
+     次墨    #78716c
+     强调    #b45309 (琥珀)
+     辅助    #1d6fa5 (靛蓝)
+     危险    #b91c1c
+     成功    #15803d
+   ═══════════════════════════════════════════════════ */
+
+QMainWindow {
+    background: #f7f5f2;
+}
+
+QWidget#centralSurface {
+    background: #f7f5f2;
+}
+
+/* ── 菜单栏 ───────────────────────────────────────── */
+
+QMenuBar {
+    background: #ffffff;
+    color: #1c1917;
+    border-bottom: 1px solid #e7e5e0;
+    padding: 4px 8px;
+    spacing: 6px;
+}
+QMenuBar::item {
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: transparent;
+}
+QMenuBar::item:selected {
+    background: #f5f0eb;
+}
+QMenu {
+    background: #ffffff;
+    border: 1px solid #e7e5e0;
+    border-radius: 8px;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 8px 16px;
+    border-radius: 6px;
+}
+QMenu::item:selected {
+    background: #f5f0eb;
+}
+
+/* ── 顶部工具栏 ───────────────────────────────────── */
+
+QFrame#toolbarFrame {
+    background: #ffffff;
+    border: 1px solid #e7e5e0;
+    border-radius: 16px;
+}
+
+/* ── 状态条 ───────────────────────────────────────── */
+
+QFrame#statusStrip {
+    background: #ffffff;
+    border: 1px solid #e7e5e0;
+    border-radius: 12px;
+}
+QLabel#statusStripLabel {
+    color: #78716c;
+    font-size: 13px;
+}
+QLabel#statusStripValue {
+    color: #1c1917;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+/* ── 更新提示条 ───────────────────────────────────── */
+
+QFrame#updateBanner {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 12px;
+}
+
+/* ── 分组面板 ─────────────────────────────────────── */
+
+QGroupBox {
+    color: #1c1917;
+    font-size: 14px;
+    font-weight: 700;
+    background: #ffffff;
+    border: 1px solid #e7e5e0;
+    border-radius: 16px;
+    margin-top: 12px;
+    padding: 16px 16px 14px 16px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 6px;
+    color: #78716c;
+}
+
+/* ── 可折叠区域标题按钮 ────────────────────────────── */
+
+QPushButton#sectionToggle {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid #f0eeeb;
+    border-radius: 0;
+    padding: 10px 4px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 700;
+    color: #44403c;
+}
+QPushButton#sectionToggle:hover {
+    background: #fafaf9;
+}
+
+/* ── 文本标签 ─────────────────────────────────────── */
+
+QLabel {
+    color: #1c1917;
+}
+QLabel#mutedLabel {
+    color: #78716c;
+    font-size: 12px;
+}
+
+/* ── 输入控件 ─────────────────────────────────────── */
+
+QLineEdit, QPlainTextEdit, QListWidget, QSpinBox {
+    background: #fafaf9;
+    border: 1px solid #d6d3d1;
+    border-radius: 10px;
+    padding: 8px 10px;
+    color: #1c1917;
+    selection-background-color: #fbbf24;
+}
+QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus, QSpinBox:focus {
+    border: 1px solid #b45309;
+    background: #ffffff;
+}
+QListWidget {
+    padding: 4px;
+}
+QListWidget::item {
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin: 1px 0;
+}
+QListWidget::item:selected {
+    background: #fef3c7;
+    color: #1c1917;
+}
+
+/* ── 按钮 — 默认 ─────────────────────────────────── */
+
+QPushButton {
+    background: #f5f5f4;
+    color: #1c1917;
+    border: 1px solid #d6d3d1;
+    border-radius: 10px;
+    padding: 9px 14px;
+    font-weight: 600;
+}
+QPushButton:hover {
+    background: #e7e5e3;
+}
+QPushButton:pressed {
+    background: #d6d3d1;
+}
+QPushButton:disabled {
+    background: #fafaf9;
+    color: #a8a29e;
+    border-color: #e7e5e0;
+}
+
+/* ── 按钮 — 主行动 (琥珀) ─────────────────────────── */
+
+QPushButton[role="primary"] {
+    background: #b45309;
+    color: #fffbeb;
+    border: none;
+}
+QPushButton[role="primary"]:hover {
+    background: #92400e;
+}
+QPushButton[role="primary"]:pressed {
+    background: #78350f;
+}
+QPushButton[role="primary"]:disabled {
+    background: #d6d3d1;
+    color: #a8a29e;
+}
+
+/* ── 按钮 — 次行动 (靛蓝) ─────────────────────────── */
+
+QPushButton[role="accent"] {
+    background: #1d6fa5;
+    color: #f0f9ff;
+    border: none;
+}
+QPushButton[role="accent"]:hover {
+    background: #175e8a;
+}
+QPushButton[role="accent"]:pressed {
+    background: #0e4f75;
+}
+
+/* ── 按钮 — 危险 ──────────────────────────────────── */
+
+QPushButton[role="danger"] {
+    background: transparent;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+}
+QPushButton[role="danger"]:hover {
+    background: #fef2f2;
+}
+QPushButton[role="danger"]:disabled {
+    color: #d6d3d1;
+    border-color: #e7e5e0;
+    background: transparent;
+}
+
+/* ── 复选框 / 单选 ────────────────────────────────── */
+
+QCheckBox, QRadioButton {
+    color: #1c1917;
+    spacing: 8px;
+}
+
+/* ── 进度条 ───────────────────────────────────────── */
+
+QProgressBar {
+    min-height: 14px;
+    max-height: 14px;
+    border-radius: 7px;
+    background: #e7e5e0;
+    border: none;
+    text-align: center;
+    color: #78716c;
+    font-size: 11px;
+    font-weight: 700;
+}
+QProgressBar::chunk {
+    border-radius: 7px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 #b45309, stop:1 #d97706);
+}
+
+/* ── 日志区域 ─────────────────────────────────────── */
+
+QPlainTextEdit#logOutput {
+    background: #1c1917;
+    color: #e7e5e0;
+    border: none;
+    border-radius: 12px;
+    padding: 12px;
+    font-family: "Cascadia Code", "Fira Code", Menlo, Monaco, "Courier New", monospace;
+    font-size: 12px;
+    selection-background-color: #44403c;
+}
+
+/* ── 滚动区域 ─────────────────────────────────────── */
+
+QScrollArea {
+    border: none;
+    background: transparent;
+}
+QScrollBar:vertical {
+    width: 8px;
+    background: transparent;
+}
+QScrollBar::handle:vertical {
+    background: #d6d3d1;
+    border-radius: 4px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #a8a29e;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}

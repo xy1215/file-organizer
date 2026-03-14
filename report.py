@@ -11,14 +11,14 @@ from jinja2 import Template
 
 
 CATEGORY_COLORS = [
-    {"surface": "#f6efe7", "border": "#d28d52", "accent": "#8b4b21", "pill": "#f0d6bc"},
-    {"surface": "#edf4ec", "border": "#659f68", "accent": "#285c30", "pill": "#d6ead6"},
-    {"surface": "#eef2fa", "border": "#6f88c9", "accent": "#314d87", "pill": "#d9e2f6"},
-    {"surface": "#fbefef", "border": "#cf6f6f", "accent": "#8d3131", "pill": "#f4d6d6"},
-    {"surface": "#f4eef8", "border": "#9372c9", "accent": "#5a3d8b", "pill": "#e5d8f5"},
-    {"surface": "#eef7f6", "border": "#58a9a4", "accent": "#1f6d68", "pill": "#d2eeeb"},
-    {"surface": "#fff4e8", "border": "#df9350", "accent": "#995314", "pill": "#f7dcc0"},
-    {"surface": "#eff5f6", "border": "#6ea0a8", "accent": "#325d63", "pill": "#d9e9ec"},
+    {"border": "#b45309", "accent": "#92400e"},
+    {"border": "#15803d", "accent": "#166534"},
+    {"border": "#1d6fa5", "accent": "#1e40af"},
+    {"border": "#b91c1c", "accent": "#991b1b"},
+    {"border": "#7c3aed", "accent": "#5b21b6"},
+    {"border": "#0f766e", "accent": "#115e59"},
+    {"border": "#c2410c", "accent": "#9a3412"},
+    {"border": "#4338ca", "accent": "#3730a3"},
 ]
 
 
