@@ -110,8 +110,8 @@ USER_GUIDE_HTML = """
 
 <h3>二、顶部几个主要按钮怎么用</h3>
 <ul>
-  <li><b>开始整理</b>：执行完整流程，包括扫描、分类，并刷新整理结果。适合日常直接使用。</li>
-  <li><b>快速整理</b>：只做扫描和分类，适合快速更新结果。</li>
+  <li><b>完整整理（含摘要）</b>：扫描文件、自动分类、生成摘要，并更新报告。适合平时正常使用。</li>
+  <li><b>快速分类</b>：扫描文件、自动分类并更新报告，但不生成摘要。适合想更快看到分类结果时使用。</li>
   <li><b>打开报告</b>：打开已经生成好的 HTML 报告，在浏览器中查看分类结果。</li>
   <li><b>取消</b>：任务运行中才会出现。点击后会尽量在当前步骤结束后安全停止。</li>
   <li><b>自动整理</b>：打开后，程序会按照右侧设置的时间间隔自动执行一次整理。</li>
@@ -146,7 +146,7 @@ USER_GUIDE_HTML = """
   <li>选择一个服务商预设</li>
   <li>填写 API Key</li>
   <li>点击 <b>保存配置</b></li>
-  <li>点击 <b>开始整理</b></li>
+  <li>点击 <b>完整整理（含摘要）</b></li>
   <li>完成后点击 <b>打开报告</b></li>
 </ol>
 
@@ -565,12 +565,12 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
 
-        self.sync_button = QPushButton("开始整理")
+        self.sync_button = QPushButton("完整整理（含摘要）")
         self.sync_button.setProperty("role", "primary")
         self.sync_button.setMinimumWidth(120)
         self.sync_button.clicked.connect(lambda: self._run_command(["sync"]))
 
-        self.scan_button = QPushButton("快速整理")
+        self.scan_button = QPushButton("快速分类")
         self.scan_button.clicked.connect(lambda: self._run_command(["scan"]))
 
         self.open_report_button = QPushButton("打开报告")
