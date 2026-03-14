@@ -146,7 +146,7 @@ class LLMClient:
             else:
                 response = self.anthropic_client.messages.create(
                     model=model_name,
-                    max_tokens=4000,
+                    max_tokens=8192,
                     temperature=0,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -164,6 +164,7 @@ class LLMClient:
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
                 temperature=0,
+                max_tokens=8192,
             )
             message = response.choices[0].message if response.choices else None
             return str(getattr(message, "content", "") or "")
