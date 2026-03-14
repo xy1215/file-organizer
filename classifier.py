@@ -223,17 +223,30 @@ def classify_files_iter(
 ) -> Iterator[tuple[int, int, list[dict[str, Any]], list[dict[str, Any]], str | None]]:
     """Yield (completed_count, total_count, batch, batch_results, error_message) after each batch."""
     def process_batch(batch: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str | None]:
-        error_message: str | None = None
-        batch_results: list[dict[str, Any]] = []
+        if is_cancelled and is_cancelled():
+            raise OperationCancelled()
         try:
             prompt = build_classification_prompt(batch)
             payload = client.complete_json(prompt, model=client.model)
             raw_results = payload.get("classifications", [])
             if isinstance(raw_results, list):
-                batch_results = [item for item in raw_results if isinstance(item, dict)]
+                return [item for item in raw_results if isinstance(item, dict)], None
+            return [], None
+        except json.JSONDecodeError as exc:
+            if len(batch) <= 1:
+                return [], str(exc) or exc.__class__.__name__
+            split_index = max(1, len(batch) // 2)
+            left_results, left_error = process_batch(batch[:split_index])
+            right_results, right_error = process_batch(batch[split_index:])
+            combined_results = left_results + right_results
+            child_errors = [message for message in [left_error, right_error] if message]
+            if child_errors:
+                if len(child_errors) == 1:
+                    return combined_results, child_errors[0]
+                return combined_results, "；".join(child_errors)
+            return combined_results, None
         except Exception as exc:
-            error_message = str(exc) or exc.__class__.__name__
-        return batch_results, error_message
+            return [], str(exc) or exc.__class__.__name__
 
     total = len(files)
     done = 0
