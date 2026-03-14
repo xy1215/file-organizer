@@ -46,6 +46,8 @@ DEFAULT_CATEGORIES = [
     "其他",
 ]
 
+JSON_OUTPUT_MAX_TOKENS = 8192
+
 
 class LLMClient:
     def __init__(self, config: dict[str, Any]) -> None:
@@ -146,7 +148,7 @@ class LLMClient:
             else:
                 response = self.anthropic_client.messages.create(
                     model=model_name,
-                    max_tokens=4000,
+                    max_tokens=JSON_OUTPUT_MAX_TOKENS,
                     temperature=0,
                     messages=[{"role": "user", "content": prompt}],
                 )
@@ -163,6 +165,7 @@ class LLMClient:
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},
+                max_tokens=JSON_OUTPUT_MAX_TOKENS,
                 temperature=0,
             )
             message = response.choices[0].message if response.choices else None
@@ -171,6 +174,7 @@ class LLMClient:
         response = self.openai_client.responses.create(
             model=model_name,
             input=prompt,
+            max_output_tokens=JSON_OUTPUT_MAX_TOKENS,
             text={"format": {"type": "json_object"}},
         )
         return response.output_text
