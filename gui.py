@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -33,6 +34,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSpinBox,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -94,6 +96,62 @@ MODEL_PRESETS = {
     },
 }
 CUSTOM_PRESET_KEY = "custom"
+USER_GUIDE_HTML = """
+<h2>文件整理助手使用说明</h2>
+<p>这个工具的作用，是帮你扫描电脑里的文件，自动做分类和简要说明，并生成一份可以在浏览器里查看的整理报告。</p>
+
+<h3>一、第一次使用</h3>
+<ol>
+  <li>在左侧的 <b>LLM 模型设置</b> 里，先选择一个服务商。</li>
+  <li>在 <b>API Key</b> 输入框里填入你申请到的密钥。</li>
+  <li>如果你不熟悉模型参数，直接使用系统自动填入的推荐配置即可。</li>
+  <li>确认扫描范围后，点击底部的 <b>保存配置</b>。</li>
+</ol>
+
+<h3>二、顶部几个主要按钮怎么用</h3>
+<ul>
+  <li><b>开始巡检</b>：执行完整流程，包括扫描、分类，并刷新整理结果。适合日常直接使用。</li>
+  <li><b>仅扫描分类</b>：只做扫描和分类，不额外执行其他整理动作。适合快速更新结果。</li>
+  <li><b>打开报告</b>：打开已经生成好的 HTML 报告，在浏览器中查看分类结果。</li>
+  <li><b>取消</b>：任务运行中才会出现。点击后会尽量在当前步骤结束后安全停止。</li>
+  <li><b>自动巡检</b>：打开后，程序会按照右侧设置的时间间隔自动执行一次巡检。</li>
+</ul>
+
+<h3>三、左侧配置区说明</h3>
+<ul>
+  <li><b>快速选择服务商</b>：可直接套用推荐的接口地址和模型配置。</li>
+  <li><b>服务商</b>：一般保持为自动填入的内容即可，进阶用户可以手动修改。</li>
+  <li><b>分类模型 / 摘要模型</b>：分别用于文件分类和内容摘要。默认推荐值通常已经够用。</li>
+  <li><b>Base URL</b>：接口地址。只有在使用自定义服务或代理时才需要自己调整。</li>
+  <li><b>扫描范围</b>：可以勾选 Desktop、Documents、Downloads，也可以手动添加额外目录。</li>
+  <li><b>排除目录名</b>：填写后，这些目录会在扫描时自动跳过。</li>
+  <li><b>性能参数</b>：影响处理速度。一般不建议频繁修改，保持默认值更稳妥。</li>
+  <li><b>摘要生成</b>：可以只给某个文件生成摘要，也可以按分类或全部生成。</li>
+</ul>
+
+<h3>四、菜单栏说明</h3>
+<ul>
+  <li><b>帮助 → 检查更新</b>：手动检查是否有新版本。</li>
+  <li><b>工具 → 强制重新扫描</b>：忽略已有缓存，从头重新扫描。</li>
+  <li><b>工具 → 刷新报告</b>：重新生成 HTML 报告。</li>
+  <li><b>工具 → 查看缓存统计</b>：查看当前缓存和处理情况。</li>
+</ul>
+
+<h3>五、右侧运行日志怎么看</h3>
+<p>右侧会显示程序的执行过程。正常情况下，你会看到“开始执行”“正在分类”“正在生成报告”“任务执行完成”等提示。出现问题时，也可以把这里的报错信息发给我排查。</p>
+
+<h3>六、如果不知道怎么选</h3>
+<p>如果你只是想尽快用起来，可以按这个顺序操作：</p>
+<ol>
+  <li>选择一个服务商预设</li>
+  <li>填写 API Key</li>
+  <li>点击 <b>保存配置</b></li>
+  <li>点击 <b>开始巡检</b></li>
+  <li>完成后点击 <b>打开报告</b></li>
+</ol>
+
+<p>如果任务执行失败，先不要着急，通常是 API Key、模型名或接口地址配置不对。先检查左侧配置是否正确，再重新运行即可。</p>
+"""
 
 
 def _load_theme() -> str:
@@ -431,6 +489,10 @@ class MainWindow(QMainWindow):
         version_action = QAction(f"当前版本 v{__version__}", self)
         version_action.setEnabled(False)
         help_menu.addAction(version_action)
+
+        guide_action = QAction("使用说明", self)
+        guide_action.triggered.connect(self._show_user_guide)
+        help_menu.addAction(guide_action)
 
         check_update_action = QAction("检查更新", self)
         check_update_action.triggered.connect(self._check_for_updates_manually)
@@ -973,6 +1035,25 @@ class MainWindow(QMainWindow):
         self._phase_value.setText(phase)
         self._elapsed_value.setText(elapsed)
         self._progress_value.setText(progress)
+
+    def _show_user_guide(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("使用说明")
+        dialog.resize(720, 620)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        browser = QTextBrowser(dialog)
+        browser.setOpenExternalLinks(True)
+        browser.setHtml(USER_GUIDE_HTML)
+
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(dialog.accept)
+
+        layout.addWidget(browser, stretch=1)
+        layout.addWidget(close_button, alignment=Qt.AlignRight)
+        dialog.exec()
 
     # ── Update logic ──────────────────────────────────────────────────
 
