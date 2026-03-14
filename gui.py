@@ -282,8 +282,8 @@ def default_config() -> dict[str, Any]:
             "exclude_patterns": ["node_modules", ".git", "__pycache__", "AppData"],
         },
         "batch_size": 30,
-        "classification_workers": 2,
-        "summary_workers": 4,
+        "classification_workers": 6,
+        "summary_workers": 8,
         "automation": {
             "auto_scan_enabled": False,
             "interval_minutes": 60,
@@ -373,18 +373,18 @@ def normalize_batch_size(raw_value: Any) -> int:
 
 def normalize_summary_workers(raw_value: Any) -> int:
     try:
-        value = int(raw_value or 4)
+        value = int(raw_value or 8)
     except (TypeError, ValueError):
-        return 4
-    return min(8, max(1, value))
+        return 8
+    return min(16, max(1, value))
 
 
 def normalize_classification_workers(raw_value: Any) -> int:
     try:
-        value = int(raw_value or 2)
+        value = int(raw_value or 6)
     except (TypeError, ValueError):
-        return 2
-    return min(4, max(1, value))
+        return 6
+    return min(12, max(1, value))
 
 
 def normalize_auto_scan_interval(raw_value: Any) -> int:
@@ -698,7 +698,7 @@ class MainWindow(QMainWindow):
         api_key_row.setSpacing(6)
         api_key_row.addWidget(self.api_key_input, stretch=1)
         self._api_key_toggle_button = QPushButton("显示")
-        self._api_key_toggle_button.setFixedWidth(48)
+        self._api_key_toggle_button.setMinimumWidth(72)
         self._api_key_toggle_button.clicked.connect(self._toggle_api_key_visibility)
         api_key_row.addWidget(self._api_key_toggle_button)
         self.model_input = QLineEdit()
@@ -764,9 +764,9 @@ class MainWindow(QMainWindow):
         self.batch_size_input = QSpinBox()
         self.batch_size_input.setRange(10, 100)
         self.classification_workers_input = QSpinBox()
-        self.classification_workers_input.setRange(1, 4)
+        self.classification_workers_input.setRange(1, 12)
         self.summary_workers_input = QSpinBox()
-        self.summary_workers_input.setRange(1, 8)
+        self.summary_workers_input.setRange(1, 16)
         perf_form.addRow("批次大小", self.batch_size_input)
         perf_form.addRow("分类并发", self.classification_workers_input)
         perf_form.addRow("摘要并发", self.summary_workers_input)
