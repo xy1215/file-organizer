@@ -110,11 +110,11 @@ USER_GUIDE_HTML = """
 
 <h3>二、顶部几个主要按钮怎么用</h3>
 <ul>
-  <li><b>开始巡检</b>：执行完整流程，包括扫描、分类，并刷新整理结果。适合日常直接使用。</li>
-  <li><b>仅扫描分类</b>：只做扫描和分类，不额外执行其他整理动作。适合快速更新结果。</li>
+  <li><b>开始整理</b>：执行完整流程，包括扫描、分类，并刷新整理结果。适合日常直接使用。</li>
+  <li><b>快速整理</b>：只做扫描和分类，适合快速更新结果。</li>
   <li><b>打开报告</b>：打开已经生成好的 HTML 报告，在浏览器中查看分类结果。</li>
   <li><b>取消</b>：任务运行中才会出现。点击后会尽量在当前步骤结束后安全停止。</li>
-  <li><b>自动巡检</b>：打开后，程序会按照右侧设置的时间间隔自动执行一次巡检。</li>
+  <li><b>自动整理</b>：打开后，程序会按照右侧设置的时间间隔自动执行一次整理。</li>
 </ul>
 
 <h3>三、左侧配置区说明</h3>
@@ -132,9 +132,9 @@ USER_GUIDE_HTML = """
 <h3>四、菜单栏说明</h3>
 <ul>
   <li><b>帮助 → 检查更新</b>：手动检查是否有新版本。</li>
-  <li><b>工具 → 强制重新扫描</b>：忽略已有缓存，从头重新扫描。</li>
-  <li><b>工具 → 刷新报告</b>：重新生成 HTML 报告。</li>
-  <li><b>工具 → 查看缓存统计</b>：查看当前缓存和处理情况。</li>
+  <li><b>工具 → 重新检查所有文件</b>：忽略已有缓存，从头重新扫描。</li>
+  <li><b>工具 → 重新生成报告</b>：重新生成 HTML 报告。</li>
+  <li><b>工具 → 查看处理情况</b>：查看当前缓存和处理情况。</li>
 </ul>
 
 <h3>五、右侧运行日志怎么看</h3>
@@ -146,7 +146,7 @@ USER_GUIDE_HTML = """
   <li>选择一个服务商预设</li>
   <li>填写 API Key</li>
   <li>点击 <b>保存配置</b></li>
-  <li>点击 <b>开始巡检</b></li>
+  <li>点击 <b>开始整理</b></li>
   <li>完成后点击 <b>打开报告</b></li>
 </ol>
 
@@ -500,15 +500,15 @@ class MainWindow(QMainWindow):
 
         tools_menu = self.menuBar().addMenu("工具")
 
-        force_scan_action = QAction("强制重新扫描", self)
+        force_scan_action = QAction("重新检查所有文件", self)
         force_scan_action.triggered.connect(lambda: self._run_command(["scan", "--force"]))
         tools_menu.addAction(force_scan_action)
 
-        refresh_report_action = QAction("刷新报告", self)
+        refresh_report_action = QAction("重新生成报告", self)
         refresh_report_action.triggered.connect(lambda: self._run_command(["report"]))
         tools_menu.addAction(refresh_report_action)
 
-        stats_action = QAction("查看缓存统计", self)
+        stats_action = QAction("查看处理情况", self)
         stats_action.triggered.connect(lambda: self._run_command(["stats"]))
         tools_menu.addAction(stats_action)
 
@@ -565,12 +565,12 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
 
-        self.sync_button = QPushButton("开始巡检")
+        self.sync_button = QPushButton("开始整理")
         self.sync_button.setProperty("role", "primary")
         self.sync_button.setMinimumWidth(120)
         self.sync_button.clicked.connect(lambda: self._run_command(["sync"]))
 
-        self.scan_button = QPushButton("仅扫描分类")
+        self.scan_button = QPushButton("快速整理")
         self.scan_button.clicked.connect(lambda: self._run_command(["scan"]))
 
         self.open_report_button = QPushButton("打开报告")
@@ -583,7 +583,7 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(False)
         self.cancel_button.setVisible(False)
 
-        self.auto_scan_checkbox = QCheckBox("自动巡检")
+        self.auto_scan_checkbox = QCheckBox("自动整理")
         self.auto_scan_checkbox.toggled.connect(lambda _: self._sync_auto_scan_timer())
         self.auto_scan_interval_input = QSpinBox()
         self.auto_scan_interval_input.setRange(15, 1440)
@@ -1260,7 +1260,7 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             return
         self._append_log(
-            f"自动巡检触发：每 {self.auto_scan_interval_input.value()} 分钟执行一次增量扫描与报告刷新。"
+            f"自动整理已触发：每 {self.auto_scan_interval_input.value()} 分钟执行一次检查和结果更新。"
         )
         self._run_command(["sync"])
 
