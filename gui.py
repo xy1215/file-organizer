@@ -693,6 +693,14 @@ class MainWindow(QMainWindow):
         self.api_key_input = QLineEdit()
         self.api_key_input.setEchoMode(QLineEdit.Password)
         self.api_key_input.setPlaceholderText("优先读取环境变量")
+        self._api_key_visible = False
+        api_key_row = QHBoxLayout()
+        api_key_row.setSpacing(6)
+        api_key_row.addWidget(self.api_key_input, stretch=1)
+        self._api_key_toggle_button = QPushButton("显示")
+        self._api_key_toggle_button.setFixedWidth(48)
+        self._api_key_toggle_button.clicked.connect(self._toggle_api_key_visibility)
+        api_key_row.addWidget(self._api_key_toggle_button)
         self.model_input = QLineEdit()
         self.summary_model_input = QLineEdit()
         self.base_url_input = QLineEdit()
@@ -701,7 +709,7 @@ class MainWindow(QMainWindow):
         llm_form.addRow("快速选择服务商", self.provider_preset_combo)
         llm_form.addRow("", preset_hint)
         llm_form.addRow("服务商", self.provider_input)
-        llm_form.addRow("API Key", self.api_key_input)
+        llm_form.addRow("API Key", api_key_row)
         llm_form.addRow("分类模型", self.model_input)
         llm_form.addRow("摘要模型", self.summary_model_input)
         llm_form.addRow("Base URL", self.base_url_input)
@@ -895,6 +903,15 @@ class MainWindow(QMainWindow):
             },
         }
 
+    def _toggle_api_key_visibility(self) -> None:
+        self._api_key_visible = not self._api_key_visible
+        if self._api_key_visible:
+            self.api_key_input.setEchoMode(QLineEdit.Normal)
+            self._api_key_toggle_button.setText("隐藏")
+        else:
+            self.api_key_input.setEchoMode(QLineEdit.Password)
+            self._api_key_toggle_button.setText("显示")
+
     def _apply_selected_model_preset(self) -> None:
         preset_key = str(self.provider_preset_combo.currentData() or CUSTOM_PRESET_KEY)
         if preset_key == CUSTOM_PRESET_KEY:
@@ -992,6 +1009,13 @@ class MainWindow(QMainWindow):
             return
 
         config = self._build_config_from_form()
+        if self._command_needs_llm(args) and not config["llm"].get("api_key"):
+            QMessageBox.warning(
+                self,
+                "缺少 API Key",
+                "当前操作需要调用 AI 模型，但 API Key 为空。\n请先在左侧配置面板填写 API Key 并保存。",
+            )
+            return
         if not self._confirm_llm_usage_if_needed(args):
             return
         if not self._ensure_saved_config_for_run(config):
@@ -1098,6 +1122,12 @@ class MainWindow(QMainWindow):
             self.confirm_before_llm = False
             self._save_llm_confirmation_preference(False)
         return True
+
+    @staticmethod
+    def _command_needs_llm(args: list[str]) -> bool:
+        if not args:
+            return False
+        return args[0] in ("scan", "sync", "summarize")
 
     def _get_llm_confirmation_copy(self, args: list[str]) -> tuple[str | None, str]:
         if args == ["sync"]:

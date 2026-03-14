@@ -15,7 +15,7 @@ pip install pyinstaller
 if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 
-pyinstaller --noconfirm --clean file-organizer.spec
+pyinstaller --noconfirm --clean file_organizer.spec
 
 echo.
 echo Build finished.
