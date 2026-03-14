@@ -570,8 +570,16 @@ class MainWindow(QMainWindow):
 
         summary_column = QVBoxLayout()
         summary_column.setSpacing(10)
-        self.hero_status_tile = self._create_status_tile("当前状态", "空闲", "准备开始")
-        self.hero_phase_tile = self._create_status_tile("最近动作", "等待中", "尚未开始任务")
+        (
+            self.hero_status_tile,
+            self.hero_status_value,
+            self.hero_status_caption,
+        ) = self._create_status_tile("当前状态", "空闲", "准备开始")
+        (
+            self.hero_phase_tile,
+            self.hero_phase_value,
+            self.hero_phase_caption,
+        ) = self._create_status_tile("最近动作", "等待中", "尚未开始任务")
         summary_column.addWidget(self.hero_status_tile, stretch=1)
         summary_column.addWidget(self.hero_phase_tile, stretch=1)
 
@@ -579,7 +587,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(summary_column, stretch=2)
         return card
 
-    def _create_status_tile(self, title: str, value: str, caption: str) -> QFrame:
+    def _create_status_tile(self, title: str, value: str, caption: str) -> tuple[QFrame, QLabel, QLabel]:
         card = QFrame()
         card.setObjectName("statusCard")
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -598,7 +606,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(heading)
         layout.addWidget(value_label)
         layout.addWidget(caption_label)
-        return card
+        return card, value_label, caption_label
 
     def _build_update_banner(self) -> QFrame:
         self.update_banner = QFrame()
