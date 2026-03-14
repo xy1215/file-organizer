@@ -286,6 +286,7 @@ class MainWindow(QMainWindow):
         self.current_total = 0
         self.current_progress = 0
         self.started_at: float | None = None
+        self.metric_value_labels: dict[str, QLabel] = {}
         self.elapsed_timer = QTimer(self)
         self.elapsed_timer.setInterval(1000)
         self.elapsed_timer.timeout.connect(self._refresh_elapsed_time)
@@ -546,7 +547,7 @@ class MainWindow(QMainWindow):
         text_column = QVBoxLayout()
         text_column.setSpacing(6)
 
-        eyebrow = QLabel("Desktop Organizer")
+        eyebrow = QLabel("桌面整理工作台")
         eyebrow.setObjectName("eyebrow")
         title = QLabel("文件整理助手")
         title.setObjectName("heroTitle")
@@ -569,14 +570,16 @@ class MainWindow(QMainWindow):
 
         summary_column = QVBoxLayout()
         summary_column.setSpacing(10)
-        summary_column.addWidget(self._make_status_tile("当前状态", "空闲", "准备开始"), stretch=1)
-        summary_column.addWidget(self._make_status_tile("最近动作", "等待中", "尚未开始任务"), stretch=1)
+        self.hero_status_tile = self._create_status_tile("当前状态", "空闲", "准备开始")
+        self.hero_phase_tile = self._create_status_tile("最近动作", "等待中", "尚未开始任务")
+        summary_column.addWidget(self.hero_status_tile, stretch=1)
+        summary_column.addWidget(self.hero_phase_tile, stretch=1)
 
         layout.addLayout(text_column, stretch=3)
         layout.addLayout(summary_column, stretch=2)
         return card
 
-    def _make_status_tile(self, title: str, value: str, caption: str) -> QFrame:
+    def _create_status_tile(self, title: str, value: str, caption: str) -> QFrame:
         card = QFrame()
         card.setObjectName("statusCard")
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -595,13 +598,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(heading)
         layout.addWidget(value_label)
         layout.addWidget(caption_label)
-
-        if title == "当前状态":
-            self.hero_status_value = value_label
-            self.hero_status_caption = caption_label
-        else:
-            self.hero_phase_value = value_label
-            self.hero_phase_caption = caption_label
         return card
 
     def _build_update_banner(self) -> QFrame:
@@ -793,10 +789,10 @@ class MainWindow(QMainWindow):
         status_row = QGridLayout()
         status_row.setHorizontalSpacing(10)
         status_row.setVerticalSpacing(10)
-        self.status_label = self._make_metric_card("状态", "空闲")
-        self.phase_label = self._make_metric_card("阶段", "等待开始")
-        self.elapsed_label = self._make_metric_card("耗时", "00:00")
-        self.progress_detail_label = self._make_metric_card("进度", "未开始")
+        self.status_label = self._create_metric_card("status", "状态", "空闲")
+        self.phase_label = self._create_metric_card("phase", "阶段", "等待开始")
+        self.elapsed_label = self._create_metric_card("elapsed", "耗时", "00:00")
+        self.progress_detail_label = self._create_metric_card("progress", "进度", "未开始")
         status_row.addWidget(self.status_label, 0, 0)
         status_row.addWidget(self.phase_label, 0, 1)
         status_row.addWidget(self.elapsed_label, 1, 0)
@@ -818,12 +814,23 @@ class MainWindow(QMainWindow):
         layout.addWidget(clear_button, alignment=Qt.AlignRight)
         return box
 
-    def _make_metric_card(self, title: str, value: str) -> QLabel:
-        label = QLabel(f"{title}\n{value}")
-        label.setObjectName("heroBadge")
-        label.setMinimumHeight(68)
-        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        return label
+    def _create_metric_card(self, key: str, title: str, value: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("statusCard")
+        card.setMinimumHeight(76)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(2)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("statusCaption")
+        value_label = QLabel(value)
+        value_label.setObjectName("statusValue")
+
+        layout.addWidget(title_label)
+        layout.addWidget(value_label)
+        self.metric_value_labels[key] = value_label
+        return card
 
     def _load_into_form(self, config: dict[str, Any]) -> None:
         llm = ensure_dict(config.get("llm", {}))
@@ -892,6 +899,23 @@ class MainWindow(QMainWindow):
         self._append_log("配置已保存到 config.yaml")
         QMessageBox.information(self, "保存成功", "配置已保存。")
 
+    def _ensure_saved_config_for_run(self, config: dict[str, Any]) -> bool:
+        saved_config = load_config()
+        if config == saved_config:
+            return True
+        reply = QMessageBox.question(
+            self,
+            "配置尚未保存",
+            "当前表单配置与已保存配置不一致。执行任务前需要先保存配置，是否继续？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return False
+        save_config(config)
+        self._append_log("运行前已保存当前配置。")
+        return True
+
     def _add_scan_path(self) -> None:
         directory = QFileDialog.getExistingDirectory(self, "选择需要扫描的目录")
         if not directory:
@@ -936,22 +960,24 @@ class MainWindow(QMainWindow):
             return
 
         config = self._build_config_from_form()
-        save_config(config)
+        if not self._ensure_saved_config_for_run(config):
+            return
         self._sync_auto_scan_timer()
         self.current_command = list(args)
         self.current_total = 0
         self.current_progress = 0
         self.started_at = time.monotonic()
         self.log_output.clear()
-        self.status_label.setText(f"状态\n运行中：{' '.join(args)}")
-        self.phase_label.setText("阶段\n任务已启动")
-        self.elapsed_label.setText("耗时\n00:00")
-        self.progress_detail_label.setText("进度\n准备中")
+        self._set_status_metrics(
+            status=f"运行中：{' '.join(args)}",
+            phase="任务已启动",
+            elapsed="00:00",
+            progress="准备中",
+        )
         self._set_busy_progress()
         self.elapsed_timer.start()
         self._append_log(f"开始执行：{' '.join(args)}")
         self._update_run_buttons(running=True)
-        self._refresh_status_badges()
 
         self.worker = CommandWorker(args=args)
         self.worker.log.connect(self._append_log)
@@ -962,13 +988,16 @@ class MainWindow(QMainWindow):
     def _on_worker_finished(self, success: bool, message: str, cancelled: bool) -> None:
         self.elapsed_timer.stop()
         self._refresh_elapsed_time()
-        self.status_label.setText("状态\n" + ("已完成" if success else ("已取消" if cancelled else "执行失败")))
-        self.phase_label.setText("阶段\n" + ("任务完成" if success else ("任务已取消" if cancelled else "任务失败")))
+        self.worker = None
+        self._set_status_metrics(
+            status="已完成" if success else ("已取消" if cancelled else "执行失败"),
+            phase="任务完成" if success else ("任务已取消" if cancelled else "任务失败"),
+        )
         if self.current_total:
             final_progress = self.current_total if success else self.current_progress
-            self.progress_detail_label.setText(f"进度\n{final_progress}/{self.current_total}")
+            self._set_metric_value("progress", f"{final_progress}/{self.current_total}")
         else:
-            self.progress_detail_label.setText("进度\n" + ("已完成" if success else ("已取消" if cancelled else "已中断")))
+            self._set_metric_value("progress", "已完成" if success else ("已取消" if cancelled else "已中断"))
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100 if success else 0)
         self.progress_bar.setFormat("完成" if success else ("已取消" if cancelled else "失败"))
@@ -977,8 +1006,6 @@ class MainWindow(QMainWindow):
         elif success:
             self._append_log("任务执行完成。")
         self._update_run_buttons(running=False)
-        self._refresh_status_badges()
-        self.worker = None
 
     def _update_run_buttons(self, running: bool = False) -> None:
         enabled = not running
@@ -1028,10 +1055,15 @@ class MainWindow(QMainWindow):
             return
         if self.ignored_update_version == update_info.info.version:
             if manual:
+                self.ignored_update_version = None
+                self.available_update = update_info.info
+                self.update_label.setText(f"发现新版本 v{update_info.info.version}，点击更新")
+                self.update_banner.show()
+                self._refresh_status_badges()
                 QMessageBox.information(
                     self,
                     "检查更新",
-                    f"发现新版本 v{update_info.info.version}，但已在本次启动中忽略。你仍可点击顶部提示条继续更新。",
+                    f"已重新显示新版本 v{update_info.info.version} 的更新提示。",
                 )
             return
         self.available_update = update_info.info
@@ -1084,6 +1116,8 @@ class MainWindow(QMainWindow):
             self.update_progress_dialog.setMaximum(0)
 
     def _on_update_download_cancel_requested(self) -> None:
+        if self.update_progress_dialog is None:
+            return
         if self.update_download_worker and self.update_download_worker.isRunning():
             self.update_progress_dialog.setLabelText("正在取消下载...")
             self.update_download_worker.cancel()
@@ -1092,6 +1126,7 @@ class MainWindow(QMainWindow):
         if self.update_progress_dialog is not None:
             self.update_progress_dialog.close()
             self.update_progress_dialog = None
+        self.update_download_worker = None
         if cancelled:
             QMessageBox.information(self, "已取消", "更新下载已取消。")
             return
@@ -1117,9 +1152,8 @@ class MainWindow(QMainWindow):
             return
         self.worker.cancel()
         self._append_log("已请求取消当前任务，正在等待当前步骤安全结束...")
-        self.phase_label.setText("阶段\n正在取消任务")
+        self._set_status_metrics(phase="正在取消任务...")
         self.cancel_button.setEnabled(False)
-        self._refresh_status_badges()
 
     def _open_report(self) -> None:
         if not REPORT_PATH.exists():
@@ -1148,9 +1182,8 @@ class MainWindow(QMainWindow):
 
     def _apply_progress_update(self, phase: str, current: int, total: int, detail: str) -> None:
         if phase == "scan":
-            self.phase_label.setText("阶段\n" + (detail or "正在扫描目录..."))
+            self._set_status_metrics(phase=detail or "正在扫描目录...")
             self._set_busy_progress()
-            self._refresh_status_badges()
             return
         if phase == "classify":
             self.current_progress = current
@@ -1159,9 +1192,7 @@ class MainWindow(QMainWindow):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(value)
             self.progress_bar.setFormat(f"{current}/{total}")
-            self.progress_detail_label.setText(f"进度\n{current}/{total}")
-            self.phase_label.setText("阶段\n" + (detail or "正在调用模型进行分类..."))
-            self._refresh_status_badges()
+            self._set_status_metrics(progress=f"{current}/{total}", phase=detail or "正在调用模型进行分类...")
             return
         if phase == "summarize":
             self.current_progress = current
@@ -1170,31 +1201,45 @@ class MainWindow(QMainWindow):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(value)
             self.progress_bar.setFormat(f"{current}/{total}")
-            self.progress_detail_label.setText(f"进度\n{current}/{total}")
-            self.phase_label.setText("阶段\n" + (detail or "正在生成摘要..."))
-            self._refresh_status_badges()
+            self._set_status_metrics(progress=f"{current}/{total}", phase=detail or "正在生成摘要...")
             return
         if phase == "report":
-            self.phase_label.setText("阶段\n" + (detail or "正在生成报告..."))
+            self._set_status_metrics(phase=detail or "正在生成报告...")
             self._set_busy_progress()
-            self._refresh_status_badges()
             return
         if phase == "stats":
-            self.phase_label.setText("阶段\n" + (detail or "正在读取缓存统计..."))
+            self._set_status_metrics(phase=detail or "正在读取缓存统计...")
             self._set_busy_progress()
-            self._refresh_status_badges()
             return
         if phase == "done":
-            self.phase_label.setText("阶段\n" + (detail or "任务完成"))
-            self._refresh_status_badges()
+            self._set_status_metrics(phase=detail or "任务完成")
 
     def _refresh_status_badges(self) -> None:
-        status_text = self.status_label.text().split("\n", 1)[-1] if "\n" in self.status_label.text() else self.status_label.text()
-        phase_text = self.phase_label.text().split("\n", 1)[-1] if "\n" in self.phase_label.text() else self.phase_label.text()
-        self.hero_status_value.setText(status_text)
+        self.hero_status_value.setText(self.metric_value_labels["status"].text())
         self.hero_status_caption.setText("有新版本可用" if self.update_banner.isVisible() else "当前未挂起更新")
         self.hero_phase_value.setText("自动巡检开启" if self.auto_scan_checkbox.isChecked() else "手动模式")
-        self.hero_phase_caption.setText(phase_text)
+        self.hero_phase_caption.setText(self.metric_value_labels["phase"].text())
+
+    def _set_metric_value(self, key: str, value: str) -> None:
+        self.metric_value_labels[key].setText(value)
+
+    def _set_status_metrics(
+        self,
+        *,
+        status: str | None = None,
+        phase: str | None = None,
+        elapsed: str | None = None,
+        progress: str | None = None,
+    ) -> None:
+        if status is not None:
+            self._set_metric_value("status", status)
+        if phase is not None:
+            self._set_metric_value("phase", phase)
+        if elapsed is not None:
+            self._set_metric_value("elapsed", elapsed)
+        if progress is not None:
+            self._set_metric_value("progress", progress)
+        self._refresh_status_badges()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -1207,15 +1252,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_elapsed_time(self) -> None:
         if self.started_at is None:
-            self.elapsed_label.setText("耗时\n00:00")
+            self._set_metric_value("elapsed", "00:00")
             return
         seconds = max(0, int(time.monotonic() - self.started_at))
         minutes, remaining = divmod(seconds, 60)
         hours, minutes = divmod(minutes, 60)
         if hours:
-            self.elapsed_label.setText(f"耗时\n{hours:02d}:{minutes:02d}:{remaining:02d}")
+            self._set_metric_value("elapsed", f"{hours:02d}:{minutes:02d}:{remaining:02d}")
             return
-        self.elapsed_label.setText(f"耗时\n{minutes:02d}:{remaining:02d}")
+        self._set_metric_value("elapsed", f"{minutes:02d}:{remaining:02d}")
 
     def _sync_auto_scan_timer(self) -> None:
         if not self.auto_scan_checkbox.isChecked():
