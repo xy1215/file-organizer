@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
     QCheckBox,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QFrame,
@@ -54,6 +55,45 @@ from version import __version__
 
 CONFIG_PATH = app_path("config.yaml")
 REPORT_PATH = app_path("report.html")
+
+MODEL_PRESETS = {
+    "deepseek": {
+        "label": "DeepSeek（推荐）",
+        "provider": "openai",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "summary_model": "deepseek-chat",
+    },
+    "zhipu": {
+        "label": "智谱 AI (GLM)",
+        "provider": "openai",
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "model": "glm-4-flash",
+        "summary_model": "glm-4-flash",
+    },
+    "moonshot": {
+        "label": "月之暗面 (Kimi)",
+        "provider": "openai",
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "moonshot-v1-8k",
+        "summary_model": "moonshot-v1-8k",
+    },
+    "qwen": {
+        "label": "通义千问 (Qwen)",
+        "provider": "openai",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-plus",
+        "summary_model": "qwen-plus",
+    },
+    "siliconflow": {
+        "label": "硅基流动 (SiliconFlow)",
+        "provider": "openai",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "Qwen/Qwen2.5-7B-Instruct",
+        "summary_model": "Qwen/Qwen2.5-7B-Instruct",
+    },
+}
+CUSTOM_PRESET_KEY = "custom"
 
 
 def _load_theme() -> str:
@@ -566,6 +606,14 @@ class MainWindow(QMainWindow):
         llm_form.setSpacing(8)
         llm_form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
+        self.provider_preset_combo = QComboBox()
+        self.provider_preset_combo.addItem("自定义", CUSTOM_PRESET_KEY)
+        for preset_key, preset in MODEL_PRESETS.items():
+            self.provider_preset_combo.addItem(str(preset["label"]), preset_key)
+        self.provider_preset_combo.currentIndexChanged.connect(self._apply_selected_model_preset)
+        preset_hint = QLabel("选择服务商后会自动填入推荐配置，API Key 需要自行申请填写")
+        preset_hint.setObjectName("mutedLabel")
+
         self.provider_input = QLineEdit()
         self.provider_input.setPlaceholderText("openai / anthropic")
         self.api_key_input = QLineEdit()
@@ -576,6 +624,8 @@ class MainWindow(QMainWindow):
         self.base_url_input = QLineEdit()
         self.base_url_input.setPlaceholderText("留空使用官方地址")
 
+        llm_form.addRow("快速选择服务商", self.provider_preset_combo)
+        llm_form.addRow("", preset_hint)
         llm_form.addRow("服务商", self.provider_input)
         llm_form.addRow("API Key", self.api_key_input)
         llm_form.addRow("分类模型", self.model_input)
@@ -732,6 +782,7 @@ class MainWindow(QMainWindow):
         for path in ensure_str_list(scan.get("paths", [])):
             self.path_list.addItem(QListWidgetItem(str(path)))
         self.exclude_input.setPlainText("\n".join(ensure_str_list(scan.get("exclude_patterns", []))))
+        self._select_preset_for_base_url(str(llm.get("base_url", "")))
         self._sync_auto_scan_timer()
 
     def _build_config_from_form(self) -> dict[str, Any]:
@@ -764,6 +815,33 @@ class MainWindow(QMainWindow):
                 "interval_minutes": self.auto_scan_interval_input.value(),
             },
         }
+
+    def _apply_selected_model_preset(self) -> None:
+        preset_key = str(self.provider_preset_combo.currentData() or CUSTOM_PRESET_KEY)
+        if preset_key == CUSTOM_PRESET_KEY:
+            return
+        preset = MODEL_PRESETS.get(preset_key)
+        if not preset:
+            return
+        self.provider_input.setText(str(preset["provider"]))
+        self.base_url_input.setText(str(preset["base_url"]))
+        self.model_input.setText(str(preset["model"]))
+        self.summary_model_input.setText(str(preset["summary_model"]))
+
+    def _select_preset_for_base_url(self, base_url: str) -> None:
+        normalized = base_url.strip().rstrip("/")
+        preset_key = CUSTOM_PRESET_KEY
+        for candidate_key, preset in MODEL_PRESETS.items():
+            preset_base_url = str(preset["base_url"]).strip().rstrip("/")
+            if normalized and normalized == preset_base_url:
+                preset_key = candidate_key
+                break
+        index = self.provider_preset_combo.findData(preset_key)
+        if index < 0:
+            index = 0
+        self.provider_preset_combo.blockSignals(True)
+        self.provider_preset_combo.setCurrentIndex(index)
+        self.provider_preset_combo.blockSignals(False)
 
     def _save_form_config(self) -> None:
         config = self._build_config_from_form()
