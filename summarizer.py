@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import csv
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import fitz
@@ -10,7 +13,9 @@ from pptx import Presentation
 
 
 class UnsupportedSummaryError(Exception):
-    pass
+    def __init__(self, message: str, *, code: str = "unsupported_type") -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def _limit_text(text: str, max_chars: int = 3000) -> str:
@@ -18,12 +23,61 @@ def _limit_text(text: str, max_chars: int = 3000) -> str:
     return cleaned[:max_chars]
 
 
+def _command_path(name: str) -> str | None:
+    return shutil.which(name)
+
+
+def _ocr_pdf_text(file_path: Path, max_pages: int = 5) -> str:
+    tesseract = _command_path("tesseract")
+    if not tesseract:
+        raise UnsupportedSummaryError(
+            "这是图片型 PDF（扫描件），当前设备未安装 OCR 组件，暂时无法提取正文。",
+            code="needs_ocr",
+        )
+
+    chunks: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="file-organizer-ocr-") as temp_dir:
+        temp_root = Path(temp_dir)
+        with fitz.open(file_path) as doc:
+            page_total = min(len(doc), max_pages)
+            for page_index in range(page_total):
+                page = doc[page_index]
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                image_path = temp_root / f"page-{page_index + 1}.png"
+                pixmap.save(str(image_path))
+                text = ""
+                for language in ("chi_sim+eng", "eng"):
+                    completed = subprocess.run(
+                        [tesseract, str(image_path), "stdout", "-l", language],
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="ignore",
+                        check=False,
+                    )
+                    text = completed.stdout.strip()
+                    if text:
+                        break
+                if text:
+                    chunks.append(text)
+    combined = "\n".join(chunks).strip()
+    if combined:
+        return _limit_text(combined)
+    raise UnsupportedSummaryError(
+        "这是图片型 PDF（扫描件），已尝试 OCR，但仍未提取到可用文字。",
+        code="no_text",
+    )
+
+
 def extract_pdf_text(file_path: Path) -> str:
     chunks: list[str] = []
     with fitz.open(file_path) as doc:
         for page_index in range(min(len(doc), 10)):
             chunks.append(doc[page_index].get_text("text"))
-    return "\n".join(chunks).strip()
+    combined = "\n".join(chunks).strip()
+    if combined:
+        return _limit_text(combined)
+    return _ocr_pdf_text(file_path)
 
 
 def extract_docx_text(file_path: Path) -> str:
@@ -55,6 +109,63 @@ def extract_pptx_text(file_path: Path) -> str:
             if hasattr(shape, "text") and str(shape.text).strip():
                 parts.append(str(shape.text).strip())
     return "\n".join(parts).strip()
+
+
+def _extract_legacy_office_text(file_path: Path) -> str:
+    soffice = _command_path("soffice")
+    if not soffice:
+        raise UnsupportedSummaryError(
+            f"这是旧版 Office 文件（{file_path.suffix.lower()}），当前设备未安装 LibreOffice，暂时无法自动转换。请先另存为新版格式后再整理。",
+            code="needs_conversion",
+        )
+
+    suffix_map = {
+        ".doc": "docx",
+        ".xls": "xlsx",
+        ".ppt": "pptx",
+    }
+    target_ext = suffix_map.get(file_path.suffix.lower())
+    if not target_ext:
+        raise UnsupportedSummaryError(
+            f"暂不支持此文件类型的摘要提取：{file_path.suffix.lower()}",
+            code="unsupported_type",
+        )
+
+    with tempfile.TemporaryDirectory(prefix="file-organizer-office-") as temp_dir:
+        output_dir = Path(temp_dir)
+        completed = subprocess.run(
+            [
+                soffice,
+                "--headless",
+                "--convert-to",
+                target_ext,
+                "--outdir",
+                str(output_dir),
+                str(file_path),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            check=False,
+        )
+        converted = output_dir / f"{file_path.stem}.{target_ext}"
+        if not converted.exists():
+            detail = completed.stderr.strip() or completed.stdout.strip() or "转换工具未返回详细信息。"
+            raise UnsupportedSummaryError(
+                f"旧版 Office 文件自动转换失败：{detail}",
+                code="needs_conversion",
+            )
+        if target_ext == "docx":
+            return extract_docx_text(converted)
+        if target_ext == "xlsx":
+            return extract_xlsx_text(converted)
+        if target_ext == "pptx":
+            return extract_pptx_text(converted)
+    raise UnsupportedSummaryError(
+        f"暂不支持此文件类型的摘要提取：{file_path.suffix.lower()}",
+        code="unsupported_type",
+    )
 
 
 def extract_text_text(file_path: Path) -> str:
@@ -102,5 +213,8 @@ def extract_text(file_path: str) -> str:
     if suffix == ".csv":
         return extract_csv_text(path)
     if suffix in {".doc", ".xls", ".ppt"}:
-        raise UnsupportedSummaryError("旧版 Office 文件暂不支持自动提取正文，请先转换为新版格式。")
-    raise UnsupportedSummaryError(f"暂不支持此文件类型的摘要提取：{suffix}")
+        return _extract_legacy_office_text(path)
+    raise UnsupportedSummaryError(
+        f"暂不支持此文件类型的摘要提取：{suffix}",
+        code="unsupported_type",
+    )

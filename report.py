@@ -129,8 +129,28 @@ def display_brief(record: dict) -> str:
         first_line = summary.splitlines()[0].strip()
         if first_line:
             return first_line
+    summary_note = str(record.get("summary_note") or "").strip()
+    if summary_note:
+        return summary_note
     brief = str(record.get("brief") or "").strip()
     return brief or "暂时没有简短描述"
+
+
+def display_summary_source(record: dict) -> tuple[str, str]:
+    if str(record.get("summary") or "").strip():
+        return "has-summary", "已生成摘要"
+    status = str(record.get("summary_status") or "").strip()
+    if status == "needs_ocr":
+        return "needs-attention", "扫描件需 OCR"
+    if status == "needs_conversion":
+        return "needs-attention", "旧版文档需转换"
+    if status == "no_text":
+        return "needs-attention", "未提取到正文"
+    if status in {"unsupported_type", "missing"}:
+        return "needs-attention", "暂不支持摘要"
+    if status == "error":
+        return "needs-attention", "摘要生成失败"
+    return "inferred", "基于文件名推测"
 
 
 def _clean_category_name(value: object) -> str:
@@ -188,6 +208,8 @@ def prepare_records(records: list[dict]) -> list[dict]:
                 "ext_class": ext_class,
                 "ext_label": ext_label,
                 "display_brief": display_brief(record),
+                "summary_source_class": display_summary_source(record)[0],
+                "summary_source_text": display_summary_source(record)[1],
             }
         )
     return prepared
@@ -301,6 +323,9 @@ def generate_reports(
                         "ext_label": file["ext_label"],
                         "display_brief": file["display_brief"],
                         "summary": file.get("summary") or "",
+                        "summary_note": file.get("summary_note") or "",
+                        "summary_source_class": file.get("summary_source_class") or "inferred",
+                        "summary_source_text": file.get("summary_source_text") or "基于文件名推测",
                     }
                     for file in category["files"]
                 ],

@@ -151,7 +151,9 @@ def _select_summary_targets(
 ) -> list[str]:
     if candidate_paths is not None:
         deduped = list(dict.fromkeys(candidate_paths))
-        return cache.filter_paths_with_category(deduped)
+        if force:
+            return cache.filter_paths_with_category(deduped)
+        return cache.filter_summary_candidate_paths(deduped)
 
     if file_path:
         return [str(Path(file_path).expanduser().resolve())]
@@ -164,6 +166,7 @@ def _select_summary_targets(
             record["file_path"]
             for record in records
             if not str(record.get("summary") or "").strip()
+            and str(record.get("summary_status") or "").strip() not in {"needs_ocr", "needs_conversion", "no_text", "unsupported_type"}
         ]
 
     if summarize_all:
@@ -174,6 +177,7 @@ def _select_summary_targets(
             record["file_path"]
             for record in records
             if not str(record.get("summary") or "").strip()
+            and str(record.get("summary_status") or "").strip() not in {"needs_ocr", "needs_conversion", "no_text", "unsupported_type"}
         ]
 
     return []
@@ -349,29 +353,29 @@ def _summarize_file(
     file_path: str,
     client_local: threading.local,
     hooks: RuntimeHooks | None = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, str | None]:
     _raise_if_cancelled(hooks)
     path = Path(file_path)
     if not path.exists():
-        return False, f"文件不存在：{file_path}"
+        return False, f"文件不存在：{file_path}", "missing"
     try:
         extracted = extract_text(file_path)
         if not extracted.strip():
-            return False, f"无法提取有效文本：{file_path}"
+            return False, f"无法提取有效文本：{file_path}", "no_text"
         client = getattr(client_local, "client", None)
         if client is None:
             client = LLMClient(config)
             client_local.client = client
         _raise_if_cancelled(hooks)
         summary = summarize_text(client, file_path, extracted)
-        return True, summary
+        return True, summary, None
     except UnsupportedSummaryError as exc:
-        return False, str(exc)
+        return False, str(exc), exc.code
     except OperationCancelled:
         raise
     except Exception as exc:
         logging.exception("摘要生成失败: %s", file_path)
-        return False, f"摘要失败：{exc}"
+        return False, f"摘要失败：{exc}", "error"
 
 
 def _run_summary_jobs(
@@ -390,6 +394,7 @@ def _run_summary_jobs(
     success = 0
     completed = 0
     pending_updates: list[tuple[str, str]] = []
+    pending_failures: list[tuple[str, str, str]] = []
     flush_size = 20
     client_local = threading.local()
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -403,12 +408,12 @@ def _run_summary_jobs(
                 target = future_map[future]
                 completed += 1
                 try:
-                    ok, message = future.result()
+                    ok, message, status = future.result()
                 except OperationCancelled:
                     raise
                 except Exception as exc:
                     logging.exception("摘要任务线程异常: %s", target)
-                    ok, message = False, f"摘要失败：{exc}"
+                    ok, message, status = False, f"摘要失败：{exc}", "error"
                 detail = f"进度：{completed}/{len(targets)} - 已完成 {Path(target).name}"
                 _log(f"[cyan]{detail}[/cyan]", hooks)
                 _progress("summarize", completed, len(targets), detail, hooks)
@@ -420,12 +425,18 @@ def _run_summary_jobs(
                         pending_updates.clear()
                 else:
                     logging.error("摘要失败: %s | %s", target, message)
+                    pending_failures.append((target, status or "error", message))
+                    if len(pending_failures) >= flush_size:
+                        cache.update_summary_failures_bulk(pending_failures)
+                        pending_failures.clear()
                 _log(message, hooks)
         except OperationCancelled:
             executor.shutdown(wait=False, cancel_futures=True)
             raise
     if pending_updates:
         cache.update_summaries_bulk(pending_updates)
+    if pending_failures:
+        cache.update_summary_failures_bulk(pending_failures)
     return success, len(targets)
 
 

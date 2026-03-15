@@ -297,7 +297,13 @@
     }
     .detail-source.has-summary { color: var(--accent); background: var(--accent-light); }
     .detail-source.inferred { color: var(--faint); background: var(--bg); border: 1px dashed var(--line); }
+    .detail-source.needs-attention { color: #9a3412; background: #ffedd5; border: 1px solid #fdba74; }
     .detail-brief { font-size: 13px; color: var(--muted); margin-bottom: 4px; word-break: break-word; }
+    .detail-note {
+      margin-bottom: 6px; padding: 10px 12px; border-radius: 10px;
+      font-size: 12px; line-height: 1.6; color: #9a3412;
+      background: #fff7ed; border: 1px solid #fed7aa; word-break: break-word;
+    }
     .detail-meta { font-size: 12px; color: var(--faint); word-break: break-word; }
     .detail-meta a { color: var(--muted); }
     .detail-meta a:hover { color: var(--accent); }
@@ -514,10 +520,12 @@
     /* ── Detail rendering ────────────────────────────── */
     function buildDetailItem(file) {
       const hasSummary = Boolean(file.summary);
-      const sourceClass = hasSummary ? 'has-summary' : 'inferred';
-      const sourceText = hasSummary ? '已生成摘要' : '基于文件名推测';
+      const sourceClass = file.summary_source_class || (hasSummary ? 'has-summary' : 'inferred');
+      const sourceText = file.summary_source_text || (hasSummary ? '已生成摘要' : '基于文件名推测');
       const brief = file.display_brief
         ? `<div class="detail-brief">${escapeHtml(file.display_brief)}</div>` : '';
+      const note = !hasSummary && file.summary_note
+        ? `<div class="detail-note">${escapeHtml(file.summary_note)}</div>` : '';
       const summary = hasSummary
         ? `<div class="detail-summary"><details><summary>展开摘要</summary><pre>${escapeHtml(file.summary)}</pre></details></div>` : '';
       return `
@@ -527,6 +535,7 @@
             <div class="detail-file">${escapeHtml(file.file_name)}</div>
             <span class="detail-source ${sourceClass}">${sourceText}</span>
             ${brief}
+            ${note}
             <div class="detail-meta">${escapeHtml(file.modified_at)} · <a href="${escapeHtml(file.file_uri)}">${escapeHtml(file.file_path)}</a></div>
             ${summary}
           </div>

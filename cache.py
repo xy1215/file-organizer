@@ -16,6 +16,8 @@ class CacheRecord:
     category: str | None = None
     brief: str | None = None
     summary: str | None = None
+    summary_status: str | None = None
+    summary_note: str | None = None
     processed_at: str | None = None
 
 
@@ -44,12 +46,15 @@ class CacheDB:
                 category TEXT,
                 brief TEXT,
                 summary TEXT,
+                summary_status TEXT,
+                summary_note TEXT,
                 processed_at TEXT NOT NULL
             )
             """
         )
         self.conn.commit()
         self._migrate_add_brief()
+        self._migrate_add_summary_metadata()
         self._migrate_add_indexes()
 
     def _migrate_add_brief(self) -> None:
@@ -60,6 +65,17 @@ class CacheDB:
         if "brief" not in columns:
             self.conn.execute("ALTER TABLE file_cache ADD COLUMN brief TEXT")
             self.conn.commit()
+
+    def _migrate_add_summary_metadata(self) -> None:
+        columns = [
+            row[1]
+            for row in self.conn.execute("PRAGMA table_info(file_cache)").fetchall()
+        ]
+        if "summary_status" not in columns:
+            self.conn.execute("ALTER TABLE file_cache ADD COLUMN summary_status TEXT")
+        if "summary_note" not in columns:
+            self.conn.execute("ALTER TABLE file_cache ADD COLUMN summary_note TEXT")
+        self.conn.commit()
 
     def _migrate_add_indexes(self) -> None:
         self.conn.execute(
@@ -186,7 +202,7 @@ class CacheDB:
         self.conn.execute(
             """
             UPDATE file_cache
-            SET summary = ?, processed_at = ?
+            SET summary = ?, summary_status = 'success', summary_note = NULL, processed_at = ?
             WHERE file_path = ?
             """,
             (summary, datetime.now().isoformat(timespec="seconds"), file_path),
@@ -201,10 +217,41 @@ class CacheDB:
             self.conn.executemany(
                 """
                 UPDATE file_cache
-                SET summary = ?, processed_at = ?
+                SET summary = ?, summary_status = 'success', summary_note = NULL, processed_at = ?
                 WHERE file_path = ?
                 """,
                 [(summary, now, file_path) for file_path, summary in rows],
+            )
+        return len(rows)
+
+    def update_summary_failure(
+        self,
+        file_path: str,
+        status: str,
+        note: str,
+    ) -> None:
+        self.conn.execute(
+            """
+            UPDATE file_cache
+            SET summary = NULL, summary_status = ?, summary_note = ?, processed_at = ?
+            WHERE file_path = ?
+            """,
+            (status, note, datetime.now().isoformat(timespec="seconds"), file_path),
+        )
+        self.conn.commit()
+
+    def update_summary_failures_bulk(self, rows: list[tuple[str, str, str]]) -> int:
+        if not rows:
+            return 0
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.conn:
+            self.conn.executemany(
+                """
+                UPDATE file_cache
+                SET summary = NULL, summary_status = ?, summary_note = ?, processed_at = ?
+                WHERE file_path = ?
+                """,
+                [(status, note, now, file_path) for file_path, status, note in rows],
             )
         return len(rows)
 
@@ -218,7 +265,24 @@ class CacheDB:
                 self.conn.execute(
                     f"""
                     UPDATE file_cache
-                    SET summary = NULL, processed_at = ?
+                    SET summary = NULL, summary_status = NULL, summary_note = NULL, processed_at = ?
+                    WHERE file_path IN ({placeholders})
+                    """,
+                    (now, *chunk),
+                )
+        return len(file_paths)
+
+    def clear_summary_failures_bulk(self, file_paths: list[str]) -> int:
+        if not file_paths:
+            return 0
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.conn:
+            for chunk in self._chunked(file_paths, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                self.conn.execute(
+                    f"""
+                    UPDATE file_cache
+                    SET summary_status = NULL, summary_note = NULL, processed_at = ?
                     WHERE file_path IN ({placeholders})
                     """,
                     (now, *chunk),
@@ -290,6 +354,36 @@ class CacheDB:
                     WHERE file_path IN ({placeholders})
                     AND category IS NOT NULL
                     AND TRIM(category) != ''
+                    """,
+                    tuple(chunk),
+                ).fetchall()
+                matched.update(row["file_path"] for row in rows)
+
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for file_path in file_paths:
+            if file_path in matched and file_path not in seen:
+                ordered.append(file_path)
+                seen.add(file_path)
+        return ordered
+
+    def filter_summary_candidate_paths(self, file_paths: list[str]) -> list[str]:
+        if not file_paths:
+            return []
+
+        matched: set[str] = set()
+        with self.conn:
+            for chunk in self._chunked(file_paths, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                rows = self.conn.execute(
+                    f"""
+                    SELECT file_path
+                    FROM file_cache
+                    WHERE file_path IN ({placeholders})
+                    AND category IS NOT NULL
+                    AND TRIM(category) != ''
+                    AND (summary IS NULL OR TRIM(summary) = '')
+                    AND COALESCE(summary_status, '') NOT IN ('needs_ocr', 'needs_conversion', 'no_text', 'unsupported_type')
                     """,
                     tuple(chunk),
                 ).fetchall()
