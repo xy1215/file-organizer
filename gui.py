@@ -1473,7 +1473,11 @@ class MainWindow(QMainWindow):
         )
         if reply != QMessageBox.Yes:
             return
-        apply_update(Path(zip_path), get_app_dir())
+        try:
+            apply_update(Path(zip_path), get_app_dir())
+        except Exception as exc:
+            QMessageBox.warning(self, "更新失败", f"应用更新时出错：{exc}")
+            return
         QApplication.quit()
 
     # ── Task control ──────────────────────────────────────────────────

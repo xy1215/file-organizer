@@ -172,11 +172,10 @@ for /l %%I in (1,1,10) do (
 :cleanup
 del "_updater.bat"
 """
-    updater_script.write_text(script_content, encoding="utf-8")
+    updater_script.write_text(script_content, encoding="mbcs")
     creationflags = (
         getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
-        | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
     )
     subprocess.Popen(
         ["cmd", "/c", str(updater_script.name)],
