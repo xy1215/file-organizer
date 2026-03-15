@@ -142,6 +142,7 @@ def apply_update(zip_path: Path, app_dir: Path) -> None:
         raise RuntimeError("自动更新仅支持 Windows 打包版。")
     update_dir = app_dir / "_update"
     updater_script = app_dir / "_updater.bat"
+    exe_path = app_dir / "文件整理助手.exe"
     if update_dir.exists():
         shutil.rmtree(update_dir, ignore_errors=True)
     update_dir.mkdir(parents=True, exist_ok=True)
@@ -154,13 +155,22 @@ def apply_update(zip_path: Path, app_dir: Path) -> None:
                 raise ValueError(f"危险路径: {info.filename}")
         archive.extractall(update_dir)
 
-    script_content = """@echo off
+    script_content = f"""@echo off
+set "APP_DIR=%~dp0"
+set "APP_EXE={exe_path.name}"
 cd /d "%~dp0"
 timeout /t 2 /nobreak >nul
 xcopy /s /y /q "_update\\*" "." >nul
 rmdir /s /q "_update"
+for /l %%I in (1,1,10) do (
+  if exist "%APP_EXE%" (
+    start "" "%APP_DIR%%APP_EXE%"
+    goto :cleanup
+  )
+  timeout /t 1 /nobreak >nul
+)
+:cleanup
 del "_updater.bat"
-start "" "文件整理助手.exe"
 """
     updater_script.write_text(script_content, encoding="utf-8")
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)

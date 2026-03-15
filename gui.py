@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import platform
 import sys
 import threading
 import time
+import urllib.parse
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -58,6 +60,7 @@ from version import __version__
 
 CONFIG_PATH = app_path("config.yaml")
 REPORT_PATH = app_path("report.html")
+FEEDBACK_ISSUE_URL = "https://github.com/xy1215/file-organizer/issues/new?labels=feedback"
 
 MODEL_PRESETS = {
     "deepseek": {
@@ -512,6 +515,10 @@ class MainWindow(QMainWindow):
         guide_action = QAction("使用说明", self)
         guide_action.triggered.connect(self._show_user_guide)
         help_menu.addAction(guide_action)
+
+        feedback_action = QAction("反馈问题或建议", self)
+        feedback_action.triggered.connect(self._show_feedback_dialog)
+        help_menu.addAction(feedback_action)
 
         check_update_action = QAction("检查更新", self)
         check_update_action.triggered.connect(self._check_for_updates_manually)
@@ -1196,6 +1203,89 @@ class MainWindow(QMainWindow):
         layout.addWidget(browser, stretch=1)
         layout.addWidget(close_button, alignment=Qt.AlignRight)
         dialog.exec()
+
+    def _show_feedback_dialog(self) -> None:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("反馈问题或建议")
+        dialog.resize(760, 620)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        intro = QLabel("如果遇到问题或有改进建议，可以在这里整理后提交。建议尽量写清楚发生了什么、你点了什么按钮、看到什么提示。")
+        intro.setWordWrap(True)
+
+        input_label = QLabel("你的反馈")
+        input_label.setStyleSheet("font-weight: 700;")
+        feedback_input = QPlainTextEdit(dialog)
+        feedback_input.setPlaceholderText("例如：点击“完整整理（含摘要）”后没有自动重启，或某个按钮的文字不容易理解。")
+
+        info_label = QLabel("将附带的信息")
+        info_label.setStyleSheet("font-weight: 700;")
+        details_browser = QTextBrowser(dialog)
+        details_browser.setPlainText(self._build_feedback_details())
+
+        button_row = QHBoxLayout()
+        copy_button = QPushButton("复制反馈内容")
+        open_button = QPushButton("打开反馈页面")
+        close_button = QPushButton("关闭")
+        open_button.setProperty("role", "primary")
+
+        copy_button.clicked.connect(
+            lambda: self._copy_feedback_to_clipboard(feedback_input.toPlainText(), details_browser.toPlainText())
+        )
+        open_button.clicked.connect(
+            lambda: self._open_feedback_page(feedback_input.toPlainText(), details_browser.toPlainText())
+        )
+        close_button.clicked.connect(dialog.accept)
+
+        button_row.addWidget(copy_button)
+        button_row.addWidget(open_button)
+        button_row.addStretch(1)
+        button_row.addWidget(close_button)
+
+        layout.addWidget(intro)
+        layout.addWidget(input_label)
+        layout.addWidget(feedback_input, stretch=1)
+        layout.addWidget(info_label)
+        layout.addWidget(details_browser, stretch=1)
+        layout.addLayout(button_row)
+        dialog.exec()
+
+    def _build_feedback_details(self) -> str:
+        recent_log = self.log_output.toPlainText().strip().splitlines()
+        log_excerpt = "\n".join(recent_log[-30:]) if recent_log else "（当前没有日志）"
+        return (
+            f"版本：v{__version__}\n"
+            f"系统：{platform.platform()}\n"
+            f"Python：{sys.version.split()[0]}\n"
+            f"当前任务：{' '.join(self.current_command) if self.current_command else '无'}\n"
+            f"最近日志：\n{log_excerpt}"
+        )
+
+    def _copy_feedback_to_clipboard(self, user_text: str, details_text: str) -> None:
+        payload = self._compose_feedback_payload(user_text, details_text)
+        QApplication.clipboard().setText(payload)
+        QMessageBox.information(self, "已复制", "反馈内容已复制，你可以直接发给维护者。")
+
+    def _open_feedback_page(self, user_text: str, details_text: str) -> None:
+        payload = self._compose_feedback_payload(user_text, details_text)
+        title = user_text.strip().splitlines()[0][:60] if user_text.strip() else "用户反馈"
+        query = urllib.parse.urlencode({"title": title, "body": payload})
+        url = QUrl(f"{FEEDBACK_ISSUE_URL}&{query}")
+        if QDesktopServices.openUrl(url):
+            return
+        QMessageBox.information(self, "打开失败", "无法直接打开反馈页面，请先复制反馈内容后手动提交。")
+
+    @staticmethod
+    def _compose_feedback_payload(user_text: str, details_text: str) -> str:
+        summary = user_text.strip() or "请在这里补充你的问题或建议。"
+        return (
+            "### 问题或建议\n"
+            f"{summary}\n\n"
+            "### 附带信息\n"
+            f"```\n{details_text.strip()}\n```"
+        )
 
     # ── Update logic ──────────────────────────────────────────────────
 
