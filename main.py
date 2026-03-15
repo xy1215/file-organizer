@@ -131,13 +131,13 @@ def get_summary_workers(config: dict[str, Any]) -> int:
 
 
 def get_classification_workers(config: dict[str, Any]) -> int:
-    raw = config.get("classification_workers", 6)
+    raw = config.get("classification_workers", 10)
     try:
-        value = int(raw or 6)
+        value = int(raw or 10)
     except (TypeError, ValueError):
-        _log("[yellow]classification_workers 配置无效，已使用默认值 6。[/yellow]")
-        value = 6
-    return min(12, max(1, value))
+        _log("[yellow]classification_workers 配置无效，已使用默认值 10。[/yellow]")
+        value = 10
+    return min(20, max(1, value))
 
 
 def _select_summary_targets(
@@ -326,7 +326,7 @@ def _scan_and_classify(
                 update_rows.append((matched_path, category, brief))
 
             classified += cache.update_categories_bulk(update_rows)
-            missing = len(set(batch_path_map.values()) - covered_paths)
+            missing = len(set(batch_id_map.values()) - covered_paths)
             if missing:
                 _log(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]", hooks)
             detail = f"进度：{done}/{total} - 已分类 {classified} 个文件"

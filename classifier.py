@@ -195,17 +195,13 @@ def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
 1. 优先使用这些分类：{categories_json}
 2. 分类采用"大类/子类"格式。如果文件明显不适合已有分类，可以创建新的中文分类，但必须遵循"大类/子类"格式。
 3. 只根据文件名和路径推断，不要虚构文件内容。
-4. confidence 取值范围 0 到 1。
-5. brief 为一句话描述（不超过 20 个汉字），根据文件名和路径推测文件可能的内容或用途。
-6. 输出必须是 JSON，格式如下：
-7. file_id 必须与输入中的 file_id 完全一致，原样返回，不要改写。
+4. brief 为一句话描述（不超过 20 个汉字），根据文件名和路径推测文件可能的内容或用途。
+5. 输出必须是 JSON，格式如下。file_id 必须与输入中的 file_id 完全一致，原样返回。
 {{
   "classifications": [
     {{
       "file_id": "文件唯一标识",
-      "file_path": "完整路径",
       "category": "大类/子类",
-      "confidence": 0.9,
       "brief": "简短描述"
     }}
   ]
