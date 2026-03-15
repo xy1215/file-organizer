@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, Callable
@@ -257,22 +257,38 @@ def classify_files_iter(
             yield done, total, batch, batch_results, error_message
         return
 
+    FUTURE_TIMEOUT = 300  # 单个 future 最长等待秒数
+
     with ThreadPoolExecutor(max_workers=worker_count) as executor:
         future_map = {
             executor.submit(process_batch, batch): batch
             for batch in batches
         }
+        pending_futures = set(future_map)
         try:
-            for future in as_completed(future_map):
+            while pending_futures:
                 if is_cancelled and is_cancelled():
                     raise OperationCancelled()
-                batch = future_map[future]
-                try:
-                    batch_results, error_message = future.result(timeout=300)
-                except TimeoutError:
-                    batch_results, error_message = [], "批次处理超时（5分钟），已跳过"
-                done += len(batch)
-                yield done, total, batch, batch_results, error_message
+                finished, pending_futures = wait(
+                    pending_futures, timeout=FUTURE_TIMEOUT, return_when=FIRST_COMPLETED,
+                )
+                if not finished:
+                    # wait 超时，pending_futures 里全是卡住的 future，全部跳过
+                    for future in pending_futures:
+                        future.cancel()
+                        batch = future_map[future]
+                        done += len(batch)
+                        yield done, total, batch, [], "批次处理超时（5分钟），已跳过"
+                    pending_futures = set()
+                    break
+                for future in finished:
+                    batch = future_map[future]
+                    try:
+                        batch_results, error_message = future.result()
+                    except Exception as exc:
+                        batch_results, error_message = [], str(exc) or exc.__class__.__name__
+                    done += len(batch)
+                    yield done, total, batch, batch_results, error_message
         except OperationCancelled:
             executor.shutdown(wait=False, cancel_futures=True)
             raise
