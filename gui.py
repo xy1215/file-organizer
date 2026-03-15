@@ -286,8 +286,8 @@ def default_config() -> dict[str, Any]:
             "exclude_patterns": ["node_modules", ".git", "__pycache__", "AppData"],
         },
         "batch_size": 30,
-        "classification_workers": 6,
-        "summary_workers": 8,
+        "classification_workers": 2,
+        "summary_workers": 4,
         "automation": {
             "auto_scan_enabled": False,
             "interval_minutes": 60,
@@ -377,18 +377,18 @@ def normalize_batch_size(raw_value: Any) -> int:
 
 def normalize_summary_workers(raw_value: Any) -> int:
     try:
-        value = int(raw_value or 8)
+        value = int(raw_value or 4)
     except (TypeError, ValueError):
-        return 8
-    return min(16, max(1, value))
+        return 4
+    return min(8, max(1, value))
 
 
 def normalize_classification_workers(raw_value: Any) -> int:
     try:
-        value = int(raw_value or 6)
+        value = int(raw_value or 2)
     except (TypeError, ValueError):
-        return 6
-    return min(12, max(1, value))
+        return 2
+    return min(4, max(1, value))
 
 
 def normalize_auto_scan_interval(raw_value: Any) -> int:
@@ -786,9 +786,9 @@ class MainWindow(QMainWindow):
         self.batch_size_input = QSpinBox()
         self.batch_size_input.setRange(10, 100)
         self.classification_workers_input = QSpinBox()
-        self.classification_workers_input.setRange(1, 12)
+        self.classification_workers_input.setRange(1, 4)
         self.summary_workers_input = QSpinBox()
-        self.summary_workers_input.setRange(1, 16)
+        self.summary_workers_input.setRange(1, 8)
         perf_form.addRow("批次大小", self.batch_size_input)
         perf_form.addRow("分类并发", self.classification_workers_input)
         perf_form.addRow("摘要并发", self.summary_workers_input)

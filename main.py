@@ -121,23 +121,23 @@ def _normalize_file_id(value: str) -> str:
 
 
 def get_summary_workers(config: dict[str, Any]) -> int:
-    raw = config.get("summary_workers", 8)
+    raw = config.get("summary_workers", 4)
     try:
-        value = int(raw or 8)
+        value = int(raw or 4)
     except (TypeError, ValueError):
-        _log("[yellow]summary_workers 配置无效，已使用默认值 8。[/yellow]")
-        value = 8
-    return min(16, max(1, value))
+        _log("[yellow]summary_workers 配置无效，已使用默认值 4。[/yellow]")
+        value = 4
+    return min(8, max(1, value))
 
 
 def get_classification_workers(config: dict[str, Any]) -> int:
-    raw = config.get("classification_workers", 10)
+    raw = config.get("classification_workers", 2)
     try:
-        value = int(raw or 10)
+        value = int(raw or 2)
     except (TypeError, ValueError):
-        _log("[yellow]classification_workers 配置无效，已使用默认值 10。[/yellow]")
-        value = 10
-    return min(20, max(1, value))
+        _log("[yellow]classification_workers 配置无效，已使用默认值 2。[/yellow]")
+        value = 2
+    return min(4, max(1, value))
 
 
 def _select_summary_targets(

@@ -6,8 +6,19 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
+from functools import lru_cache
+
 from app_paths import app_path, resource_path
 from jinja2 import Template
+
+
+def _load_html_template() -> Template:
+    return Template(resource_path("report_template.html").read_text(encoding="utf-8"), autoescape=True)
+
+
+@lru_cache(maxsize=1)
+def _get_html_template() -> Template:
+    return _load_html_template()
 
 
 CATEGORY_COLORS = [
@@ -20,9 +31,6 @@ CATEGORY_COLORS = [
     {"border": "#c2410c", "accent": "#9a3412"},
     {"border": "#4338ca", "accent": "#3730a3"},
 ]
-
-
-HTML_TEMPLATE = Template(resource_path("report_template.html").read_text(encoding="utf-8"), autoescape=True)
 
 
 _EXT_MAP = {
@@ -334,7 +342,7 @@ def generate_reports(
         ]
     }
 
-    html = HTML_TEMPLATE.render(
+    html = _get_html_template().render(
         generated_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         total_files=len(prepared),
         total_categories=len(categories),

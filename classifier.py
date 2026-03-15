@@ -103,7 +103,8 @@ class LLMClient:
                     break
                 if delay > 0:
                     time.sleep(delay)
-        assert last_error is not None
+        if last_error is None:
+            raise RuntimeError("重试已耗尽但未捕获到异常")
         raise last_error
 
     @staticmethod

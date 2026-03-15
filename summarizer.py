@@ -36,6 +36,7 @@ def _ocr_pdf_text(file_path: Path, max_pages: int = 5) -> str:
         )
 
     chunks: list[str] = []
+    last_stderr = ""
     with tempfile.TemporaryDirectory(prefix="file-organizer-ocr-") as temp_dir:
         temp_root = Path(temp_dir)
         with fitz.open(file_path) as doc:
@@ -47,14 +48,20 @@ def _ocr_pdf_text(file_path: Path, max_pages: int = 5) -> str:
                 pixmap.save(str(image_path))
                 text = ""
                 for language in ("chi_sim+eng", "eng"):
-                    completed = subprocess.run(
-                        [tesseract, str(image_path), "stdout", "-l", language],
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="ignore",
-                        check=False,
-                    )
+                    try:
+                        completed = subprocess.run(
+                            [tesseract, str(image_path), "stdout", "-l", language],
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="ignore",
+                            check=False,
+                            timeout=120,
+                        )
+                    except subprocess.TimeoutExpired:
+                        continue
+                    if completed.returncode != 0 and completed.stderr.strip():
+                        last_stderr = completed.stderr.strip()
                     text = completed.stdout.strip()
                     if text:
                         break
@@ -63,8 +70,11 @@ def _ocr_pdf_text(file_path: Path, max_pages: int = 5) -> str:
     combined = "\n".join(chunks).strip()
     if combined:
         return _limit_text(combined)
+    detail = "已尝试 OCR，但仍未提取到可用文字。"
+    if last_stderr:
+        detail += f"（Tesseract 提示：{last_stderr[:200]}）"
     raise UnsupportedSummaryError(
-        "这是图片型 PDF（扫描件），已尝试 OCR，但仍未提取到可用文字。",
+        f"这是图片型 PDF（扫描件），{detail}",
         code="no_text",
     )
 
@@ -107,15 +117,17 @@ def extract_docx_text(file_path: Path) -> str:
 
 def extract_xlsx_text(file_path: Path) -> str:
     workbook = load_workbook(file_path, read_only=True, data_only=True)
-    parts: list[str] = []
-    for sheet in workbook.worksheets:
-        parts.append(f"Sheet: {sheet.title}")
-        for row_index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
-            if row_index > 20:
-                break
-            values = [str(cell) if cell is not None else "" for cell in row]
-            parts.append(" | ".join(values))
-    workbook.close()
+    try:
+        parts: list[str] = []
+        for sheet in workbook.worksheets:
+            parts.append(f"Sheet: {sheet.title}")
+            for row_index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+                if row_index > 20:
+                    break
+                values = [str(cell) if cell is not None else "" for cell in row]
+                parts.append(" | ".join(values))
+    finally:
+        workbook.close()
     return "\n".join(parts).strip()
 
 
@@ -152,22 +164,29 @@ def _extract_legacy_office_text(file_path: Path) -> str:
 
     with tempfile.TemporaryDirectory(prefix="file-organizer-office-") as temp_dir:
         output_dir = Path(temp_dir)
-        completed = subprocess.run(
-            [
-                soffice,
-                "--headless",
-                "--convert-to",
-                target_ext,
-                "--outdir",
-                str(output_dir),
-                str(file_path),
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="ignore",
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                [
+                    soffice,
+                    "--headless",
+                    "--convert-to",
+                    target_ext,
+                    "--outdir",
+                    str(output_dir),
+                    str(file_path),
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+                check=False,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise UnsupportedSummaryError(
+                f"旧版 Office 文件转换超时（超过 120 秒），请检查 LibreOffice 是否正常运行。",
+                code="needs_conversion",
+            )
         converted = output_dir / f"{file_path.stem}.{target_ext}"
         if not converted.exists():
             detail = completed.stderr.strip() or completed.stdout.strip() or "转换工具未返回详细信息。"
@@ -188,7 +207,9 @@ def _extract_legacy_office_text(file_path: Path) -> str:
 
 
 def extract_text_text(file_path: Path) -> str:
-    return _limit_text(file_path.read_text(encoding="utf-8", errors="ignore"), 3000)
+    with file_path.open("r", encoding="utf-8", errors="ignore") as handle:
+        text = handle.read(3000)
+    return text.strip()
 
 
 def extract_csv_text(file_path: Path) -> str:
