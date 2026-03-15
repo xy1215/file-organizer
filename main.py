@@ -183,12 +183,13 @@ def _select_summary_targets(
     return []
 
 
-def _scan_and_classify(
+def _scan_and_prepare(
     cache: CacheDB,
     config: dict[str, Any],
     force: bool = False,
     hooks: RuntimeHooks | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
+    """Scan filesystem and diff against cache. Returns None if no files found."""
     _raise_if_cancelled(hooks)
     _log("[cyan]正在扫描目录，请稍候...[/cyan]", hooks)
     _progress("scan", 0, 0, "正在扫描目录...", hooks)
@@ -205,12 +206,7 @@ def _scan_and_classify(
     )
     if not scanned_files:
         _log("[yellow]没有扫描到符合条件的文件。[/yellow]", hooks)
-        return {
-            "scanned_files": [],
-            "changed_paths": [],
-            "summary_targets": [],
-            "classified": 0,
-        }
+        return None
 
     _raise_if_cancelled(hooks)
     _log(f"[cyan]扫描完成，发现 {len(scanned_files)} 个符合条件的文件，正在检查缓存...[/cyan]", hooks)
@@ -261,88 +257,144 @@ def _scan_and_classify(
             if item.file_path not in unchanged_paths
         ]
 
+    pending_path_set = {item["file_path"] for item in pending}
+    return {
+        "scanned_files": scanned_files,
+        "changed_paths": changed_paths,
+        "pending": pending,
+        "summary_candidates": summary_candidates,
+        "summary_candidate_set": summary_candidate_seen,
+        "pending_path_set": pending_path_set,
+    }
+
+
+def _process_classify_batch_results(
+    batch: list[dict[str, Any]],
+    batch_results: list[dict[str, Any]],
+) -> tuple[list[tuple[str, str, str | None]], set[str], int]:
+    """Process classification batch results. Returns (update_rows, covered_paths, missing_count)."""
+    batch_path_map: dict[str, str] = {}
+    batch_id_map: dict[str, str] = {}
+    for item in batch:
+        batch_file_path = str(item.get("file_path") or "").strip()
+        normalized = _normalize_file_path(batch_file_path)
+        if normalized:
+            batch_path_map.setdefault(normalized, batch_file_path)
+        file_id = _normalize_file_id(str(item.get("file_id") or ""))
+        if file_id:
+            batch_id_map.setdefault(file_id, batch_file_path)
+
+    update_rows: list[tuple[str, str, str | None]] = []
+    covered_paths: set[str] = set()
+    for item in batch_results:
+        file_id = _normalize_file_id(str(item.get("file_id") or ""))
+        file_path = str(item.get("file_path") or "").strip()
+        category = str(item.get("category") or "").strip()
+        matched_path = batch_id_map.get(file_id) if file_id else None
+        if not matched_path:
+            normalized = _normalize_file_path(file_path)
+            matched_path = batch_path_map.get(normalized)
+        if not category or not matched_path:
+            continue
+        brief = str(item.get("brief") or "").strip() or None
+        if matched_path in covered_paths:
+            continue
+        covered_paths.add(matched_path)
+        update_rows.append((matched_path, category, brief))
+
+    missing = len(set(batch_id_map.values()) - covered_paths)
+    return update_rows, covered_paths, missing
+
+
+def _run_classify_loop(
+    cache: CacheDB,
+    config: dict[str, Any],
+    pending: list[dict[str, Any]],
+    hooks: RuntimeHooks | None = None,
+    on_batch_done: Callable[[list[str]], None] | None = None,
+) -> int:
+    """Run classification loop. Returns total classified count. Calls on_batch_done with classified paths after each batch."""
+    if not pending:
+        return 0
+
+    try:
+        client = LLMClient(config)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    batch_size = get_batch_size(config)
+    classification_workers = min(get_classification_workers(config), max(1, (len(pending) + batch_size - 1) // batch_size))
+    _log(
+        f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理（并发 {classification_workers}）。[/cyan]",
+        hooks,
+    )
+    _progress("classify", 0, len(pending), "正在调用模型进行分类...", hooks)
+
+    classified = 0
+    failed_batches = 0
+    for done, total, batch, batch_results, batch_error in classify_files_iter(
+        client,
+        pending,
+        batch_size=batch_size,
+        workers=classification_workers,
+        is_cancelled=hooks.is_cancelled if hooks else None,
+    ):
+        _raise_if_cancelled(hooks)
+        if batch_error:
+            failed_batches += 1
+            _log(
+                f"[yellow]警告：批次分类失败，已跳过该批次（{done}/{total}）：{batch_error}[/yellow]",
+                hooks,
+            )
+
+        update_rows, covered_paths, missing = _process_classify_batch_results(batch, batch_results)
+        classified += cache.update_categories_bulk(update_rows)
+
+        if on_batch_done and covered_paths:
+            on_batch_done(list(covered_paths))
+
+        if missing:
+            _log(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]", hooks)
+        detail = f"进度：{done}/{total} - 已分类 {classified} 个文件"
+        _log(detail, hooks)
+        _progress("classify", done, total, detail, hooks)
+
+    if failed_batches:
+        _log(
+            f"[yellow]分类阶段有 {failed_batches} 个批次失败，其他批次已继续处理。可稍后执行 sync/scan 重试。[/yellow]",
+            hooks,
+        )
+    return classified
+
+
+def _scan_and_classify(
+    cache: CacheDB,
+    config: dict[str, Any],
+    force: bool = False,
+    hooks: RuntimeHooks | None = None,
+) -> dict[str, Any]:
+    prep = _scan_and_prepare(cache, config, force=force, hooks=hooks)
+    if prep is None:
+        return {
+            "scanned_files": [],
+            "changed_paths": [],
+            "summary_targets": [],
+            "classified": 0,
+        }
+
+    scanned_files = prep["scanned_files"]
+    pending = prep["pending"]
+
     classified = 0
     if not pending:
         _log(f"[green]扫描完成，共 {len(scanned_files)} 个文件，未发现需要重新分类的文件。[/green]", hooks)
     else:
-        try:
-            client = LLMClient(config)
-        except ValueError as exc:
-            raise click.ClickException(str(exc)) from exc
+        classified = _run_classify_loop(cache, config, pending, hooks=hooks)
 
-        batch_size = get_batch_size(config)
-        classification_workers = min(get_classification_workers(config), max(1, (len(pending) + batch_size - 1) // batch_size))
-        _log(
-            f"[cyan]缓存检查完成，开始分类，共 {len(pending)} 个文件待处理（并发 {classification_workers}）。[/cyan]"
-            ,
-            hooks,
-        )
-        _progress("classify", 0, len(pending), "正在调用模型进行分类...", hooks)
-
-        failed_batches = 0
-        for done, total, batch, batch_results, batch_error in classify_files_iter(
-            client,
-            pending,
-            batch_size=batch_size,
-            workers=classification_workers,
-            is_cancelled=hooks.is_cancelled if hooks else None,
-        ):
-            _raise_if_cancelled(hooks)
-            batch_path_map: dict[str, str] = {}
-            batch_id_map: dict[str, str] = {}
-            for item in batch:
-                batch_file_path = str(item.get("file_path") or "").strip()
-                normalized = _normalize_file_path(batch_file_path)
-                if normalized:
-                    batch_path_map.setdefault(normalized, batch_file_path)
-                file_id = _normalize_file_id(str(item.get("file_id") or ""))
-                if file_id:
-                    batch_id_map.setdefault(file_id, batch_file_path)
-            update_rows: list[tuple[str, str, str | None]] = []
-            covered_paths: set[str] = set()
-
-            if batch_error:
-                failed_batches += 1
-                _log(
-                    f"[yellow]警告：批次分类失败，已跳过该批次（{done}/{total}）：{batch_error}[/yellow]"
-                    ,
-                    hooks,
-                )
-
-            for item in batch_results:
-                file_id = _normalize_file_id(str(item.get("file_id") or ""))
-                file_path = str(item.get("file_path") or "").strip()
-                category = str(item.get("category") or "").strip()
-                matched_path = batch_id_map.get(file_id) if file_id else None
-                if not matched_path:
-                    normalized = _normalize_file_path(file_path)
-                    matched_path = batch_path_map.get(normalized)
-                if not category or not matched_path:
-                    continue
-                brief = str(item.get("brief") or "").strip() or None
-                if matched_path in covered_paths:
-                    continue
-                covered_paths.add(matched_path)
-                update_rows.append((matched_path, category, brief))
-
-            classified += cache.update_categories_bulk(update_rows)
-            missing = len(set(batch_id_map.values()) - covered_paths)
-            if missing:
-                _log(f"[yellow]当前批次有 {missing} 个文件未返回分类结果，将在后续扫描重试。[/yellow]", hooks)
-            detail = f"进度：{done}/{total} - 已分类 {classified} 个文件"
-            _log(detail, hooks)
-            _progress("classify", done, total, detail, hooks)
-        if failed_batches:
-            _log(
-                f"[yellow]分类阶段有 {failed_batches} 个批次失败，其他批次已继续处理。可稍后执行 sync/scan 重试。[/yellow]"
-                ,
-                hooks,
-            )
-
-    summary_targets = _select_summary_targets(cache, candidate_paths=summary_candidates)
+    summary_targets = _select_summary_targets(cache, candidate_paths=prep["summary_candidates"])
     return {
         "scanned_files": scanned_files,
-        "changed_paths": changed_paths,
+        "changed_paths": prep["changed_paths"],
         "summary_targets": summary_targets,
         "classified": classified,
     }
@@ -516,14 +568,116 @@ def run_sync(
     config = load_config()
     cache = get_cache()
     try:
-        result = _scan_and_classify(cache, config, force=force_scan, hooks=hooks)
-        scanned_files = result["scanned_files"]
-        if not scanned_files:
+        prep = _scan_and_prepare(cache, config, force=force_scan, hooks=hooks)
+        if prep is None:
             return
-        targets = result["summary_targets"]
-        if force_summary:
-            targets = _select_summary_targets(cache, summarize_all=True, force=True)
-        success, total = _run_summary_jobs(cache, config, targets, hooks=hooks)
+
+        scanned_files = prep["scanned_files"]
+        pending = prep["pending"]
+        summary_candidates = prep["summary_candidates"]
+        summary_candidate_set = prep["summary_candidate_set"]
+        pending_path_set = prep["pending_path_set"]
+
+        # --- Pipeline: summary executor runs in background during classification ---
+        summary_workers = get_summary_workers(config)
+        client_local = threading.local()
+        summary_futures: dict[Any, str] = {}
+        summary_success = 0
+        summary_completed = 0
+        pending_updates: list[tuple[str, str]] = []
+        pending_failures: list[tuple[str, str, str]] = []
+        flush_size = 20
+
+        summary_executor = ThreadPoolExecutor(max_workers=summary_workers)
+        try:
+            # Submit summary jobs for files that already have categories (unchanged files)
+            immediate_candidates = [p for p in summary_candidates if p not in pending_path_set]
+            if immediate_candidates:
+                if force_summary:
+                    immediate_targets = _select_summary_targets(cache, candidate_paths=immediate_candidates, force=True)
+                else:
+                    immediate_targets = _select_summary_targets(cache, candidate_paths=immediate_candidates)
+                for target in immediate_targets:
+                    future = summary_executor.submit(_summarize_file, config, target, client_local, hooks)
+                    summary_futures[future] = target
+
+            # Classification loop — submit summary jobs as each batch completes
+            def _on_batch_classified(classified_paths: list[str]) -> None:
+                batch_candidates = [p for p in classified_paths if p in summary_candidate_set]
+                if not batch_candidates:
+                    return
+                if force_summary:
+                    batch_targets = _select_summary_targets(cache, candidate_paths=batch_candidates, force=True)
+                else:
+                    batch_targets = _select_summary_targets(cache, candidate_paths=batch_candidates)
+                for target in batch_targets:
+                    future = summary_executor.submit(_summarize_file, config, target, client_local, hooks)
+                    summary_futures[future] = target
+
+            classified = 0
+            if not pending:
+                _log(f"[green]扫描完成，共 {len(scanned_files)} 个文件，未发现需要重新分类的文件。[/green]", hooks)
+            else:
+                classified = _run_classify_loop(
+                    cache, config, pending, hooks=hooks,
+                    on_batch_done=_on_batch_classified,
+                )
+
+            # If force_summary, also submit any remaining categorized files not yet queued
+            if force_summary:
+                already_submitted = set(summary_futures.values())
+                all_targets = _select_summary_targets(cache, summarize_all=True, force=True)
+                for target in all_targets:
+                    if target not in already_submitted:
+                        future = summary_executor.submit(_summarize_file, config, target, client_local, hooks)
+                        summary_futures[future] = target
+
+            # Collect summary results
+            summary_total = len(summary_futures)
+            if summary_futures:
+                _log(f"[cyan]等待摘要完成，共 {summary_total} 个文件...[/cyan]", hooks)
+                _progress("summarize", 0, summary_total, "正在生成摘要...", hooks)
+                for future in as_completed(summary_futures):
+                    _raise_if_cancelled(hooks)
+                    target = summary_futures[future]
+                    summary_completed += 1
+                    try:
+                        ok, message, status = future.result()
+                    except OperationCancelled:
+                        raise
+                    except Exception as exc:
+                        logging.exception("摘要任务线程异常: %s", target)
+                        ok, message, status = False, f"摘要失败：{exc}", "error"
+                    detail = f"进度：{summary_completed}/{summary_total} - 已完成 {Path(target).name}"
+                    _log(f"[cyan]{detail}[/cyan]", hooks)
+                    _progress("summarize", summary_completed, summary_total, detail, hooks)
+                    if ok:
+                        summary_success += 1
+                        pending_updates.append((target, message))
+                        if len(pending_updates) >= flush_size:
+                            cache.update_summaries_bulk(pending_updates)
+                            pending_updates.clear()
+                    else:
+                        logging.error("摘要失败: %s | %s", target, message)
+                        pending_failures.append((target, status or "error", message))
+                        if len(pending_failures) >= flush_size:
+                            cache.update_summary_failures_bulk(pending_failures)
+                            pending_failures.clear()
+                    _log(message, hooks)
+            elif not pending:
+                _log("[yellow]没有找到需要生成摘要的文件。[/yellow]", hooks)
+
+            if pending_updates:
+                cache.update_summaries_bulk(pending_updates)
+            if pending_failures:
+                cache.update_summary_failures_bulk(pending_failures)
+
+        except OperationCancelled:
+            summary_executor.shutdown(wait=False, cancel_futures=True)
+            raise
+        finally:
+            summary_executor.shutdown(wait=False)
+
         _raise_if_cancelled(hooks)
         _log("[cyan]正在刷新报告...[/cyan]", hooks)
         _progress("report", 0, 0, "正在生成报告...", hooks)
@@ -533,8 +687,7 @@ def run_sync(
             json_path=str(app_path("report.json")),
         )
         _log(
-            f"[green]同步完成。总扫描 {len(scanned_files)} 个文件，本次分类 {result['classified']} 个文件，摘要成功 {success}/{total}。[/green]"
-            ,
+            f"[green]同步完成。总扫描 {len(scanned_files)} 个文件，本次分类 {classified} 个文件，摘要成功 {summary_success}/{summary_total}。[/green]",
             hooks,
         )
         _log("[green]已生成 report.html 和 report.json。[/green]", hooks)
