@@ -113,6 +113,10 @@ def human_size(size: int) -> str:
 
 
 def file_uri(file_path: str) -> str:
+    raw_path = file_path.strip()
+    if raw_path.startswith("\\\\"):
+        unc_path = raw_path.lstrip("\\").replace("\\", "/")
+        return f"file://{quote(unc_path, safe='/')}"
     normalized = file_path.replace("\\", "/")
     if normalized.startswith("/"):
         return f"file://{quote(normalized, safe='/')}"

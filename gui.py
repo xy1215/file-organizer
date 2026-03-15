@@ -460,8 +460,15 @@ class MainWindow(QMainWindow):
         self.auto_scan_timer.timeout.connect(self._trigger_auto_sync)
 
         self.setWindowTitle(f"文件整理助手 v{__version__}")
-        self.resize(960, 700)
-        self.setMinimumSize(720, 520)
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            initial_width = min(1180, max(860, int(available.width() * 0.72)))
+            initial_height = min(860, max(620, int(available.height() * 0.78)))
+            self.resize(initial_width, initial_height)
+        else:
+            self.resize(1080, 760)
+        self.setMinimumSize(760, 560)
         self.setStyleSheet(_load_theme())
         self._setup_menu_bar()
 
@@ -662,8 +669,10 @@ class MainWindow(QMainWindow):
         layout = QBoxLayout(QBoxLayout.LeftToRight)
         self._main_area_layout = layout
         layout.setSpacing(12)
-        layout.addWidget(self._build_config_panel(), stretch=2)
-        layout.addWidget(self._build_log_panel(), stretch=3)
+        self.config_panel = self._build_config_panel()
+        self.log_panel = self._build_log_panel()
+        layout.addWidget(self.config_panel, stretch=2)
+        layout.addWidget(self.log_panel, stretch=3)
         return layout
 
     # ── Config panel (with collapsible sections) ──────────────────────
@@ -1401,9 +1410,16 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        width = self.width()
+        width = self.centralWidget().width() if self.centralWidget() is not None else self.width()
+        threshold = 900
+        if hasattr(self, "config_panel") and hasattr(self, "log_panel"):
+            threshold = (
+                self.config_panel.minimumSizeHint().width()
+                + self.log_panel.minimumSizeHint().width()
+                + 48
+            )
         self._main_area_layout.setDirection(
-            QBoxLayout.TopToBottom if width < 900 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if width < threshold else QBoxLayout.LeftToRight
         )
 
 
