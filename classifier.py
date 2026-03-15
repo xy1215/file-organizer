@@ -61,7 +61,7 @@ class LLMClient:
             raise ValueError("未配置 API Key，请在 config.yaml 或环境变量 LLM_API_KEY 中设置。")
 
         if self.provider == "openai":
-            kwargs: dict[str, Any] = {"api_key": self.api_key}
+            kwargs: dict[str, Any] = {"api_key": self.api_key, "timeout": 120}
             if self.base_url:
                 kwargs["base_url"] = self.base_url
             self.openai_client = OpenAI(**kwargs)
@@ -267,7 +267,10 @@ def classify_files_iter(
                 if is_cancelled and is_cancelled():
                     raise OperationCancelled()
                 batch = future_map[future]
-                batch_results, error_message = future.result()
+                try:
+                    batch_results, error_message = future.result(timeout=300)
+                except TimeoutError:
+                    batch_results, error_message = [], "批次处理超时（5分钟），已跳过"
                 done += len(batch)
                 yield done, total, batch, batch_results, error_message
         except OperationCancelled:
