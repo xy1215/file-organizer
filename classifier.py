@@ -285,7 +285,10 @@ def classify_files_iter(
 
             for future in completed:
                 batch = future_map[future]
-                batch_results, error_message = future.result()
+                try:
+                    batch_results, error_message = future.result()
+                except Exception as exc:
+                    batch_results, error_message = [], f"批次处理异常：{exc}"
                 done += len(batch)
                 yield done, total, batch, batch_results, error_message
     except OperationCancelled:
