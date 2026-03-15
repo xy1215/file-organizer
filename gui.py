@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import platform
+import shutil
 import sys
 import threading
 import time
@@ -523,6 +524,11 @@ class MainWindow(QMainWindow):
         check_update_action = QAction("检查更新", self)
         check_update_action.triggered.connect(self._check_for_updates_manually)
         help_menu.addAction(check_update_action)
+
+        help_menu.addSeparator()
+        deps_action = QAction("可选组件安装指引", self)
+        deps_action.triggered.connect(self._show_optional_deps_guide)
+        help_menu.addAction(deps_action)
 
         tools_menu = self.menuBar().addMenu("工具")
 
@@ -1202,6 +1208,78 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(browser, stretch=1)
         layout.addWidget(close_button, alignment=Qt.AlignRight)
+        dialog.exec()
+
+    def _show_optional_deps_guide(self) -> None:
+        has_soffice = shutil.which("soffice") is not None
+        has_tesseract = shutil.which("tesseract") is not None
+        soffice_status = "✅ 已安装" if has_soffice else "❌ 未安装"
+        tesseract_status = "✅ 已安装" if has_tesseract else "❌ 未安装"
+
+        html = f"""
+<h2 style="margin-top:0;">可选组件安装指引</h2>
+<p>以下组件为<b>可选</b>安装，安装后可以增强文件识别能力。</p>
+
+<hr/>
+
+<h3>1. LibreOffice — 旧版 Office 文件支持 &nbsp; {soffice_status}</h3>
+<p>安装后可自动提取 <code>.doc</code>、<code>.xls</code>、<code>.ppt</code> 等旧版 Office 文件的正文。</p>
+<ul>
+  <li><b>下载地址：</b><a href="https://www.libreoffice.org/download/download-libreoffice/">https://www.libreoffice.org/download/download-libreoffice/</a></li>
+  <li>选择 Windows x86_64 版本，下载 <b>msi 安装包</b></li>
+  <li>安装时使用默认选项即可，安装完成后<b>重启本程序</b></li>
+</ul>
+
+<hr/>
+
+<h3>2. Tesseract OCR — 扫描件 PDF 识别 &nbsp; {tesseract_status}</h3>
+<p>安装后可对图片型 PDF（扫描件、截图、证件照片等）进行文字识别。</p>
+<ul>
+  <li><b>下载地址：</b><a href="https://github.com/UB-Mannheim/tesseract/wiki">https://github.com/UB-Mannheim/tesseract/wiki</a></li>
+  <li>下载最新的 <b>tesseract-ocr-w64-setup</b> 安装包</li>
+  <li>安装时请注意勾选 <b>Additional language data → Chinese Simplified</b>（中文简体语言包）</li>
+  <li>安装完成后需要<b>将 Tesseract 加入系统 PATH</b>：
+    <ol>
+      <li>默认安装路径为 <code>C:\\Program Files\\Tesseract-OCR</code></li>
+      <li>右键"此电脑" → 属性 → 高级系统设置 → 环境变量</li>
+      <li>在"系统变量"中找到 <code>Path</code>，点击编辑，新增上述路径</li>
+      <li><b>重启本程序</b>使其生效</li>
+    </ol>
+  </li>
+</ul>
+"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("可选组件安装指引")
+        dialog.resize(680, 560)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        browser = QTextBrowser(dialog)
+        browser.setOpenExternalLinks(True)
+        browser.setHtml(html)
+
+        button_row = QHBoxLayout()
+        if not has_soffice:
+            lo_button = QPushButton("打开 LibreOffice 下载页")
+            lo_button.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl("https://www.libreoffice.org/download/download-libreoffice/"))
+            )
+            button_row.addWidget(lo_button)
+        if not has_tesseract:
+            tess_button = QPushButton("打开 Tesseract 下载页")
+            tess_button.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl("https://github.com/UB-Mannheim/tesseract/wiki"))
+            )
+            button_row.addWidget(tess_button)
+
+        button_row.addStretch(1)
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(dialog.accept)
+        button_row.addWidget(close_button)
+
+        layout.addWidget(browser, stretch=1)
+        layout.addLayout(button_row)
         dialog.exec()
 
     def _show_feedback_dialog(self) -> None:

@@ -82,7 +82,26 @@ def extract_pdf_text(file_path: Path) -> str:
 
 def extract_docx_text(file_path: Path) -> str:
     doc = Document(file_path)
-    parts = [paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()]
+    parts: list[str] = []
+    # 段落文本
+    for paragraph in doc.paragraphs:
+        if paragraph.text.strip():
+            parts.append(paragraph.text)
+    # 表格文本（CheatSheet、简历等常用表格排版）
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+    # 文本框 / 形状中的文字（通过底层 XML 提取）
+    try:
+        from docx.oxml.ns import qn
+        for txbx in doc.element.iter(qn("w:txbxContent")):
+            for p in txbx.iter(qn("w:t")):
+                if p.text and p.text.strip():
+                    parts.append(p.text.strip())
+    except Exception:
+        pass
     return _limit_text("\n".join(parts), 3000)
 
 
