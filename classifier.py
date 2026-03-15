@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, Callable
@@ -61,7 +61,7 @@ class LLMClient:
             raise ValueError("未配置 API Key，请在 config.yaml 或环境变量 LLM_API_KEY 中设置。")
 
         if self.provider == "openai":
-            kwargs: dict[str, Any] = {"api_key": self.api_key}
+            kwargs: dict[str, Any] = {"api_key": self.api_key, "timeout": 120}
             if self.base_url:
                 kwargs["base_url"] = self.base_url
             self.openai_client = OpenAI(**kwargs)
@@ -257,22 +257,42 @@ def classify_files_iter(
             yield done, total, batch, batch_results, error_message
         return
 
-    with ThreadPoolExecutor(max_workers=worker_count) as executor:
-        future_map = {
-            executor.submit(process_batch, batch): batch
-            for batch in batches
-        }
-        try:
-            for future in as_completed(future_map):
-                if is_cancelled and is_cancelled():
-                    raise OperationCancelled()
+    executor = ThreadPoolExecutor(max_workers=worker_count)
+    future_map = {
+        executor.submit(process_batch, batch): batch
+        for batch in batches
+    }
+    pending_futures = set(future_map)
+    try:
+        while pending_futures:
+            if is_cancelled and is_cancelled():
+                raise OperationCancelled()
+            completed, pending_futures = wait(
+                pending_futures,
+                timeout=300,
+                return_when=FIRST_COMPLETED,
+            )
+            if not completed:
+                timed_out = list(pending_futures)
+                for future in timed_out:
+                    future.cancel()
+                for future in timed_out:
+                    batch = future_map[future]
+                    done += len(batch)
+                    yield done, total, batch, [], "批次处理超时（5分钟内无任何请求完成），已跳过"
+                executor.shutdown(wait=False, cancel_futures=True)
+                return
+
+            for future in completed:
                 batch = future_map[future]
                 batch_results, error_message = future.result()
                 done += len(batch)
                 yield done, total, batch, batch_results, error_message
-        except OperationCancelled:
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise
+    except OperationCancelled:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def build_summary_prompt(file_path: str, extracted_text: str) -> str:
