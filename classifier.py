@@ -67,7 +67,7 @@ class LLMClient:
             self.openai_client = OpenAI(**kwargs)
             self.anthropic_client = None
         elif self.provider == "anthropic":
-            self.anthropic_client = anthropic.Anthropic(api_key=self.api_key)
+            self.anthropic_client = anthropic.Anthropic(api_key=self.api_key, timeout=120)
             self.openai_client = None
         else:
             raise ValueError(f"不支持的 LLM provider: {self.provider}")

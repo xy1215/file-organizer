@@ -455,14 +455,17 @@ def _run_summary_jobs(
             for target in targets
         }
         try:
-            for future in as_completed(future_map):
+            for future in as_completed(future_map, timeout=600):
                 _raise_if_cancelled(hooks)
                 target = future_map[future]
                 completed += 1
                 try:
-                    ok, message, status = future.result()
+                    ok, message, status = future.result(timeout=300)
                 except OperationCancelled:
                     raise
+                except TimeoutError:
+                    logging.error("摘要任务超时: %s", target)
+                    ok, message, status = False, f"摘要超时（超过 5 分钟）：{Path(target).name}", "error"
                 except Exception as exc:
                     logging.exception("摘要任务线程异常: %s", target)
                     ok, message, status = False, f"摘要失败：{exc}", "error"
@@ -482,6 +485,9 @@ def _run_summary_jobs(
                         cache.update_summary_failures_bulk(pending_failures)
                         pending_failures.clear()
                 _log(message, hooks)
+        except TimeoutError:
+            logging.error("摘要整体超时（10 分钟内无新任务完成），跳过剩余 %d 个", len(targets) - completed)
+            executor.shutdown(wait=False, cancel_futures=True)
         except OperationCancelled:
             executor.shutdown(wait=False, cancel_futures=True)
             raise
@@ -637,14 +643,17 @@ def run_sync(
             if summary_futures:
                 _log(f"[cyan]等待摘要完成，共 {summary_total} 个文件...[/cyan]", hooks)
                 _progress("summarize", 0, summary_total, "正在生成摘要...", hooks)
-                for future in as_completed(summary_futures):
+                for future in as_completed(summary_futures, timeout=600):
                     _raise_if_cancelled(hooks)
                     target = summary_futures[future]
                     summary_completed += 1
                     try:
-                        ok, message, status = future.result()
+                        ok, message, status = future.result(timeout=300)
                     except OperationCancelled:
                         raise
+                    except TimeoutError:
+                        logging.error("摘要任务超时: %s", target)
+                        ok, message, status = False, f"摘要超时（超过 5 分钟）：{Path(target).name}", "error"
                     except Exception as exc:
                         logging.exception("摘要任务线程异常: %s", target)
                         ok, message, status = False, f"摘要失败：{exc}", "error"
@@ -672,6 +681,9 @@ def run_sync(
             if pending_failures:
                 cache.update_summary_failures_bulk(pending_failures)
 
+        except TimeoutError:
+            logging.error("摘要整体超时（10 分钟内无新任务完成），跳过剩余任务")
+            summary_executor.shutdown(wait=False, cancel_futures=True)
         except OperationCancelled:
             summary_executor.shutdown(wait=False, cancel_futures=True)
             raise
