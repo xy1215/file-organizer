@@ -5,7 +5,7 @@ import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any, Callable
 
 import click
@@ -18,9 +18,9 @@ ensure_numpy_legacy_aliases()
 
 from cache import CacheDB
 from classifier import LLMClient, build_file_stub, classify_files_iter, summarize_text
-from common import OperationCancelled, ensure_dict, ensure_str_list
+from common import IdleTimeout, OperationCancelled, ensure_dict, ensure_str_list, iter_completed
 from report import generate_reports
-from scanner import scan_files
+from scanner import is_under_any_root, resolve_scan_roots, scan_files
 from summarizer import UnsupportedSummaryError, extract_text
 
 
@@ -37,6 +37,9 @@ logging.basicConfig(
 LogCallback = Callable[[str], None]
 ProgressCallback = Callable[[str, int, int, str], None]
 CancelChecker = Callable[[], bool]
+
+SUMMARY_IDLE_TIMEOUT = 600
+SUMMARY_FLUSH_SIZE = 20
 
 
 @dataclass
@@ -195,15 +198,24 @@ def _scan_and_prepare(
     _progress("scan", 0, 0, "正在扫描目录...", hooks)
     scan_config = ensure_dict(config.get("scan", {}))
     default_paths_config = ensure_dict(scan_config.get("default_paths", {}))
+    scan_paths = ensure_str_list(scan_config.get("paths", []))
+    default_path_flags = {
+        "desktop": bool(default_paths_config.get("desktop", True)),
+        "documents": bool(default_paths_config.get("documents", True)),
+        "downloads": bool(default_paths_config.get("downloads", True)),
+    }
     scanned_files = scan_files(
-        paths=ensure_str_list(scan_config.get("paths", [])),
+        paths=scan_paths,
         exclude_patterns=ensure_str_list(scan_config.get("exclude_patterns", [])),
-        default_path_flags={
-            "desktop": bool(default_paths_config.get("desktop", True)),
-            "documents": bool(default_paths_config.get("documents", True)),
-            "downloads": bool(default_paths_config.get("downloads", True)),
-        },
+        default_path_flags=default_path_flags,
     )
+    unreachable_roots = [
+        root
+        for root in resolve_scan_roots(scan_paths, default_path_flags=default_path_flags)
+        if not root.exists()
+    ]
+    for root in unreachable_roots:
+        _log(f"[yellow]扫描目录当前不可访问，已保留其缓存记录：{root}[/yellow]", hooks)
     if not scanned_files:
         _log("[yellow]没有扫描到符合条件的文件。[/yellow]", hooks)
         return None
@@ -213,7 +225,11 @@ def _scan_and_prepare(
     _progress("scan", len(scanned_files), len(scanned_files), "扫描完成，正在检查缓存...", hooks)
     existing_records = cache.index_scan_state_by_path()
     scanned_paths = {item.file_path for item in scanned_files}
-    removed = cache.delete_absent_files(scanned_paths)
+    # Files under an offline drive / disconnected share are not "deleted": keep their paid-for results.
+    kept_paths = scanned_paths | {
+        path for path in existing_records if unreachable_roots and is_under_any_root(path, unreachable_roots)
+    }
+    removed = cache.delete_absent_files(kept_paths)
     if removed:
         _log(f"[cyan]已清理 {removed} 条失效缓存记录（源文件不存在）。[/cyan]", hooks)
 
@@ -430,6 +446,65 @@ def _summarize_file(
         return False, f"摘要失败：{exc}", "error"
 
 
+def _collect_summary_results(
+    cache: CacheDB,
+    future_map: dict[Future, str],
+    hooks: RuntimeHooks | None = None,
+) -> int:
+    """Drain summary futures into the cache. Returns the success count.
+
+    Results are flushed in batches and once more on exit, so completed work survives
+    cancellation and timeouts.
+    """
+    total = len(future_map)
+    success = 0
+    completed = 0
+    pending_updates: list[tuple[str, str]] = []
+    pending_failures: list[tuple[str, str, str]] = []
+    try:
+        for future in iter_completed(
+            future_map,
+            SUMMARY_IDLE_TIMEOUT,
+            hooks.is_cancelled if hooks else None,
+        ):
+            target = future_map[future]
+            completed += 1
+            try:
+                ok, message, status = future.result()
+            except OperationCancelled:
+                raise
+            except Exception as exc:
+                logging.exception("摘要任务线程异常: %s", target)
+                ok, message, status = False, f"摘要失败：{exc}", "error"
+            detail = f"进度：{completed}/{total} - 已完成 {Path(target).name}"
+            _log(f"[cyan]{detail}[/cyan]", hooks)
+            _progress("summarize", completed, total, detail, hooks)
+            if ok:
+                success += 1
+                pending_updates.append((target, message))
+                if len(pending_updates) >= SUMMARY_FLUSH_SIZE:
+                    cache.update_summaries_bulk(pending_updates)
+                    pending_updates.clear()
+            else:
+                logging.error("摘要失败: %s | %s", target, message)
+                pending_failures.append((target, status or "error", message))
+                if len(pending_failures) >= SUMMARY_FLUSH_SIZE:
+                    cache.update_summary_failures_bulk(pending_failures)
+                    pending_failures.clear()
+            _log(message, hooks)
+    except IdleTimeout:
+        skipped = total - completed
+        logging.error("摘要长时间无进展（%d 秒内无任务完成），跳过剩余 %d 个", SUMMARY_IDLE_TIMEOUT, skipped)
+        _log(
+            f"[yellow]摘要长时间无进展，已跳过剩余 {skipped} 个文件，可稍后重新执行摘要。[/yellow]",
+            hooks,
+        )
+    finally:
+        cache.update_summaries_bulk(pending_updates)
+        cache.update_summary_failures_bulk(pending_failures)
+    return success
+
+
 def _run_summary_jobs(
     cache: CacheDB,
     config: dict[str, Any],
@@ -443,58 +518,16 @@ def _run_summary_jobs(
     workers = min(get_summary_workers(config), len(targets))
     _log(f"[cyan]已找到 {len(targets)} 个目标文件，开始生成摘要（并发 {workers}）...[/cyan]", hooks)
     _progress("summarize", 0, len(targets), "正在生成摘要...", hooks)
-    success = 0
-    completed = 0
-    pending_updates: list[tuple[str, str]] = []
-    pending_failures: list[tuple[str, str, str]] = []
-    flush_size = 20
     client_local = threading.local()
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    executor = ThreadPoolExecutor(max_workers=workers)
+    try:
         future_map = {
             executor.submit(_summarize_file, config, target, client_local, hooks): target
             for target in targets
         }
-        try:
-            for future in as_completed(future_map, timeout=600):
-                _raise_if_cancelled(hooks)
-                target = future_map[future]
-                completed += 1
-                try:
-                    ok, message, status = future.result(timeout=300)
-                except OperationCancelled:
-                    raise
-                except TimeoutError:
-                    logging.error("摘要任务超时: %s", target)
-                    ok, message, status = False, f"摘要超时（超过 5 分钟）：{Path(target).name}", "error"
-                except Exception as exc:
-                    logging.exception("摘要任务线程异常: %s", target)
-                    ok, message, status = False, f"摘要失败：{exc}", "error"
-                detail = f"进度：{completed}/{len(targets)} - 已完成 {Path(target).name}"
-                _log(f"[cyan]{detail}[/cyan]", hooks)
-                _progress("summarize", completed, len(targets), detail, hooks)
-                if ok:
-                    success += 1
-                    pending_updates.append((target, message))
-                    if len(pending_updates) >= flush_size:
-                        cache.update_summaries_bulk(pending_updates)
-                        pending_updates.clear()
-                else:
-                    logging.error("摘要失败: %s | %s", target, message)
-                    pending_failures.append((target, status or "error", message))
-                    if len(pending_failures) >= flush_size:
-                        cache.update_summary_failures_bulk(pending_failures)
-                        pending_failures.clear()
-                _log(message, hooks)
-        except TimeoutError:
-            logging.error("摘要整体超时（10 分钟内无新任务完成），跳过剩余 %d 个", len(targets) - completed)
-            executor.shutdown(wait=False, cancel_futures=True)
-        except OperationCancelled:
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise
-    if pending_updates:
-        cache.update_summaries_bulk(pending_updates)
-    if pending_failures:
-        cache.update_summary_failures_bulk(pending_failures)
+        success = _collect_summary_results(cache, future_map, hooks)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return success, len(targets)
 
 
@@ -588,11 +621,6 @@ def run_sync(
         summary_workers = get_summary_workers(config)
         client_local = threading.local()
         summary_futures: dict[Any, str] = {}
-        summary_success = 0
-        summary_completed = 0
-        pending_updates: list[tuple[str, str]] = []
-        pending_failures: list[tuple[str, str, str]] = []
-        flush_size = 20
 
         summary_executor = ThreadPoolExecutor(max_workers=summary_workers)
         try:
@@ -640,55 +668,15 @@ def run_sync(
 
             # Collect summary results
             summary_total = len(summary_futures)
+            summary_success = 0
             if summary_futures:
                 _log(f"[cyan]等待摘要完成，共 {summary_total} 个文件...[/cyan]", hooks)
                 _progress("summarize", 0, summary_total, "正在生成摘要...", hooks)
-                for future in as_completed(summary_futures, timeout=600):
-                    _raise_if_cancelled(hooks)
-                    target = summary_futures[future]
-                    summary_completed += 1
-                    try:
-                        ok, message, status = future.result(timeout=300)
-                    except OperationCancelled:
-                        raise
-                    except TimeoutError:
-                        logging.error("摘要任务超时: %s", target)
-                        ok, message, status = False, f"摘要超时（超过 5 分钟）：{Path(target).name}", "error"
-                    except Exception as exc:
-                        logging.exception("摘要任务线程异常: %s", target)
-                        ok, message, status = False, f"摘要失败：{exc}", "error"
-                    detail = f"进度：{summary_completed}/{summary_total} - 已完成 {Path(target).name}"
-                    _log(f"[cyan]{detail}[/cyan]", hooks)
-                    _progress("summarize", summary_completed, summary_total, detail, hooks)
-                    if ok:
-                        summary_success += 1
-                        pending_updates.append((target, message))
-                        if len(pending_updates) >= flush_size:
-                            cache.update_summaries_bulk(pending_updates)
-                            pending_updates.clear()
-                    else:
-                        logging.error("摘要失败: %s | %s", target, message)
-                        pending_failures.append((target, status or "error", message))
-                        if len(pending_failures) >= flush_size:
-                            cache.update_summary_failures_bulk(pending_failures)
-                            pending_failures.clear()
-                    _log(message, hooks)
+                summary_success = _collect_summary_results(cache, summary_futures, hooks)
             elif not pending:
                 _log("[yellow]没有找到需要生成摘要的文件。[/yellow]", hooks)
-
-            if pending_updates:
-                cache.update_summaries_bulk(pending_updates)
-            if pending_failures:
-                cache.update_summary_failures_bulk(pending_failures)
-
-        except TimeoutError:
-            logging.error("摘要整体超时（10 分钟内无新任务完成），跳过剩余任务")
-            summary_executor.shutdown(wait=False, cancel_futures=True)
-        except OperationCancelled:
-            summary_executor.shutdown(wait=False, cancel_futures=True)
-            raise
         finally:
-            summary_executor.shutdown(wait=False)
+            summary_executor.shutdown(wait=False, cancel_futures=True)
 
         _raise_if_cancelled(hooks)
         _log("[cyan]正在刷新报告...[/cyan]", hooks)

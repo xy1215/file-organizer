@@ -104,6 +104,22 @@ def is_valid_file(path: Path, file_size: int) -> bool:
     return True
 
 
+def resolve_scan_roots(
+    paths: list[str] | None = None,
+    default_path_flags: dict[str, bool] | None = None,
+) -> list[Path]:
+    return compact_scan_roots(normalize_scan_paths(paths, default_path_flags=default_path_flags))
+
+
+def is_under_any_root(file_path: str, roots: list[Path]) -> bool:
+    key = os.path.normcase(file_path)
+    for root in roots:
+        root_key = os.path.normcase(str(root)).rstrip("\\/")
+        if key == root_key or key.startswith(root_key + os.sep):
+            return True
+    return False
+
+
 def scan_files(
     paths: list[str] | None = None,
     exclude_patterns: list[str] | None = None,
@@ -116,7 +132,7 @@ def scan_files(
     }
     scanned: list[ScannedFile] = []
     seen_files: set[str] = set()
-    for root in compact_scan_roots(normalize_scan_paths(paths, default_path_flags=default_path_flags)):
+    for root in resolve_scan_roots(paths, default_path_flags=default_path_flags):
         if not root.exists():
             continue
         for current_root, dirnames, filenames in os.walk(root):

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import codecs
 import csv
+import io
 import shutil
 import subprocess
 import tempfile
@@ -121,14 +123,21 @@ def extract_xlsx_text(file_path: Path) -> str:
         parts: list[str] = []
         for sheet in workbook.worksheets:
             parts.append(f"Sheet: {sheet.title}")
-            for row_index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
-                if row_index > 20:
-                    break
-                values = [str(cell) if cell is not None else "" for cell in row]
+            kept_rows = 0
+            # Cap scanned rows too: sparse sheets can have many blank rows before data.
+            for row in sheet.iter_rows(values_only=True, max_row=200):
+                values = ["" if cell is None else str(cell).strip() for cell in row]
+                while values and not values[-1]:
+                    values.pop()
+                if not any(values):
+                    continue
                 parts.append(" | ".join(values))
+                kept_rows += 1
+                if kept_rows >= 20:
+                    break
     finally:
         workbook.close()
-    return "\n".join(parts).strip()
+    return _limit_text("\n".join(parts), 6000)
 
 
 def extract_pptx_text(file_path: Path) -> str:
@@ -139,7 +148,7 @@ def extract_pptx_text(file_path: Path) -> str:
         for shape in slide.shapes:
             if hasattr(shape, "text") and str(shape.text).strip():
                 parts.append(str(shape.text).strip())
-    return "\n".join(parts).strip()
+    return _limit_text("\n".join(parts), 6000)
 
 
 def _extract_legacy_office_text(file_path: Path) -> str:
@@ -184,7 +193,7 @@ def _extract_legacy_office_text(file_path: Path) -> str:
             )
         except subprocess.TimeoutExpired:
             raise UnsupportedSummaryError(
-                f"旧版 Office 文件转换超时（超过 120 秒），请检查 LibreOffice 是否正常运行。",
+                "旧版 Office 文件转换超时（超过 120 秒），请检查 LibreOffice 是否正常运行。",
                 code="needs_conversion",
             )
         converted = output_dir / f"{file_path.stem}.{target_ext}"
@@ -206,10 +215,43 @@ def _extract_legacy_office_text(file_path: Path) -> str:
     )
 
 
+_TEXT_SNIFF_BYTES = 64 * 1024
+_BOM_ENCODINGS = (
+    (codecs.BOM_UTF8, "utf-8-sig"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+
+
+def _decode_text_bytes(data: bytes, complete: bool) -> str:
+    """Decode a (possibly truncated) byte prefix of a plain-text file.
+
+    Order: BOM, strict UTF-8, then GB18030 (a superset of GBK, the default ANSI
+    code page on Chinese Windows), finally lossy UTF-8.
+    """
+    for bom, encoding in _BOM_ENCODINGS:
+        if data.startswith(bom):
+            decoder = codecs.getincrementaldecoder(encoding)(errors="ignore")
+            return decoder.decode(data, final=complete)
+    for encoding in ("utf-8", "gb18030"):
+        decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
+        try:
+            # final=False tolerates a multi-byte character cut off at the read limit.
+            return decoder.decode(data, final=complete)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="ignore")
+
+
+def _read_text_prefix(file_path: Path, max_bytes: int = _TEXT_SNIFF_BYTES) -> str:
+    with file_path.open("rb") as handle:
+        data = handle.read(max_bytes + 1)
+    complete = len(data) <= max_bytes
+    return _decode_text_bytes(data[:max_bytes], complete)
+
+
 def extract_text_text(file_path: Path) -> str:
-    with file_path.open("r", encoding="utf-8", errors="ignore") as handle:
-        text = handle.read(3000)
-    return text.strip()
+    return _read_text_prefix(file_path)[:3000].strip()
 
 
 def extract_csv_text(file_path: Path) -> str:
@@ -217,23 +259,22 @@ def extract_csv_text(file_path: Path) -> str:
     max_chars = 3000
     collected: list[str] = []
     total_chars = 0
-    with file_path.open("r", encoding="utf-8", errors="ignore", newline="") as handle:
-        reader = csv.reader(handle)
-        for index, row in enumerate(reader, start=1):
-            if index > max_rows:
-                break
-            line = ", ".join(row).strip()
-            if not line:
-                continue
-            remaining = max_chars - total_chars
-            if remaining <= 0:
-                break
-            if len(line) > remaining:
-                line = line[:remaining]
-            collected.append(line)
-            total_chars += len(line) + 1
-            if total_chars >= max_chars:
-                break
+    reader = csv.reader(io.StringIO(_read_text_prefix(file_path), newline=""))
+    for index, row in enumerate(reader, start=1):
+        if index > max_rows:
+            break
+        line = ", ".join(row).strip()
+        if not line:
+            continue
+        remaining = max_chars - total_chars
+        if remaining <= 0:
+            break
+        if len(line) > remaining:
+            line = line[:remaining]
+        collected.append(line)
+        total_chars += len(line) + 1
+        if total_chars >= max_chars:
+            break
     return "\n".join(collected).strip()
 
 

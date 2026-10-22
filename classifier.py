@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import time
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from collections.abc import Iterator
 from typing import Any, Callable
@@ -13,7 +13,7 @@ import anthropic
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError
 from openai import BadRequestError, NotFoundError, OpenAI, RateLimitError
 
-from common import OperationCancelled, ensure_dict
+from common import IdleTimeout, OperationCancelled, ensure_dict, iter_completed
 
 
 DEFAULT_CATEGORIES = [
@@ -47,6 +47,7 @@ DEFAULT_CATEGORIES = [
 ]
 
 JSON_OUTPUT_MAX_TOKENS = 8192
+CLASSIFY_IDLE_TIMEOUT = 300
 
 
 class LLMClient:
@@ -186,11 +187,38 @@ def chunk_list(items: list[Any], size: int) -> Iterator[list[Any]]:
         yield items[index : index + size]
 
 
+def _display_dir(parent_path: str) -> str:
+    """Shorten the user's home prefix to ``~``: fewer tokens and no account name sent to the API."""
+    if not parent_path:
+        return ""
+    home = str(Path.home())
+    if os.path.normcase(parent_path) == os.path.normcase(home):
+        return "~"
+    home_root = home.rstrip("\\/")
+    if not home_root:
+        return parent_path
+    prefix = home_root + os.sep
+    if os.path.normcase(parent_path).startswith(os.path.normcase(prefix)):
+        return "~" + os.sep + parent_path[len(prefix):]
+    return parent_path
+
+
 def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
-    files_json = json.dumps(batch, ensure_ascii=False, indent=2)
+    # One compact object per line; the full path is not repeated since name + dir already carry it.
+    files_json = "\n".join(
+        json.dumps(
+            {
+                "file_id": item.get("file_id", ""),
+                "name": item.get("file_name", ""),
+                "dir": _display_dir(str(item.get("parent_path") or "")),
+            },
+            ensure_ascii=False,
+        )
+        for item in batch
+    )
     categories_json = json.dumps(DEFAULT_CATEGORIES, ensure_ascii=False)
     return f"""
-你是一个本地文件整理助手。请根据文件名和所在路径，对文件进行分类，并给出简短描述。
+你是一个本地文件整理助手。请根据文件名（name）和所在目录（dir，~ 表示用户主目录），对文件进行分类，并给出简短描述。
 
 要求：
 1. 优先使用这些分类：{categories_json}
@@ -208,9 +236,11 @@ def build_classification_prompt(batch: list[dict[str, Any]]) -> str:
   ]
 }}
 
-文件列表：
+文件列表（每行一个 JSON 对象）：
 {files_json}
 """.strip()
+
+
 def classify_files_iter(
     client: LLMClient,
     files: list[dict[str, Any]],
@@ -263,38 +293,25 @@ def classify_files_iter(
         executor.submit(process_batch, batch): batch
         for batch in batches
     }
-    pending_futures = set(future_map)
     try:
-        while pending_futures:
-            if is_cancelled and is_cancelled():
-                raise OperationCancelled()
-            completed, pending_futures = wait(
-                pending_futures,
-                timeout=300,
-                return_when=FIRST_COMPLETED,
-            )
-            if not completed:
-                timed_out = list(pending_futures)
-                for future in timed_out:
-                    future.cancel()
-                for future in timed_out:
-                    batch = future_map[future]
-                    done += len(batch)
-                    yield done, total, batch, [], "批次处理超时（5分钟内无任何请求完成），已跳过"
-                executor.shutdown(wait=False, cancel_futures=True)
-                return
-
-            for future in completed:
+        try:
+            for future in iter_completed(future_map, CLASSIFY_IDLE_TIMEOUT, is_cancelled):
                 batch = future_map[future]
                 try:
                     batch_results, error_message = future.result()
+                except OperationCancelled:
+                    raise
                 except Exception as exc:
                     batch_results, error_message = [], f"批次处理异常：{exc}"
                 done += len(batch)
                 yield done, total, batch, batch_results, error_message
-    except OperationCancelled:
-        executor.shutdown(wait=False, cancel_futures=True)
-        raise
+        except IdleTimeout as exc:
+            for future in exc.pending:
+                future.cancel()
+            for future in exc.pending:
+                batch = future_map[future]
+                done += len(batch)
+                yield done, total, batch, [], "批次处理超时（5分钟内无任何请求完成），已跳过"
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
