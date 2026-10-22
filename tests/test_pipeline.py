@@ -115,3 +115,22 @@ def test_collect_summary_results_flushes_on_cancel(env):
         assert cache.get(paths[2]).summary_status is None
     finally:
         cache.close()
+
+
+def test_force_rescan_keeps_summaries_of_unchanged_files(env):
+    note = env["data_dir"] / "note.txt"
+    note.write_text("内容", encoding="utf-8")
+    edited = env["data_dir"] / "edited.txt"
+    edited.write_text("旧内容", encoding="utf-8")
+    main.run_sync(hooks=main.RuntimeHooks(log=lambda message: None))
+
+    edited.write_text("新的内容更长", encoding="utf-8")
+    main.run_scan(force=True, hooks=main.RuntimeHooks(log=lambda message: None))
+
+    cache = _cache(env)
+    try:
+        assert cache.get(str(note.resolve())).summary, "re-classifying must not throw away a still-valid summary"
+        assert cache.get(str(edited.resolve())).summary is None, "a file whose content changed needs a new summary"
+        assert all(row["category"] for row in cache.list_all())
+    finally:
+        cache.close()

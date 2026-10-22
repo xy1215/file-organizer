@@ -233,28 +233,26 @@ def _scan_and_prepare(
     if removed:
         _log(f"[cyan]已清理 {removed} 条失效缓存记录（源文件不存在）。[/cyan]", hooks)
 
-    unchanged_paths: set[str] = set()
     upsert_rows: list[tuple[str, int, float]] = []
     changed_paths: list[str] = []
-    changed_path_set: set[str] = set()
+    pending: list[dict[str, Any]] = []
     summary_candidates: list[str] = []
     summary_candidate_seen: set[str] = set()
     for item in scanned_files:
         _raise_if_cancelled(hooks)
         record = existing_records.get(item.file_path)
-        unchanged = (
-            not force
-            and record is not None
-            and record.file_size == item.size
-            and record.modified_time == item.modified_time
-            and record.has_category
+        # Content changes invalidate the summary; a forced re-scan only re-classifies, so a summary
+        # of an untouched file stays valid and is not paid for again.
+        content_changed = (
+            record is None
+            or record.file_size != item.size
+            or record.modified_time != item.modified_time
         )
-        if unchanged:
-            unchanged_paths.add(item.file_path)
-        else:
+        if content_changed:
             changed_paths.append(item.file_path)
-            changed_path_set.add(item.file_path)
-        if force or record is None or not record.has_summary or item.file_path in changed_path_set:
+        if force or content_changed or not record.has_category:
+            pending.append(build_file_stub(item.file_path))
+        if content_changed or not record.has_summary:
             if item.file_path not in summary_candidate_seen:
                 summary_candidate_seen.add(item.file_path)
                 summary_candidates.append(item.file_path)
@@ -263,15 +261,6 @@ def _scan_and_prepare(
     cache.upsert_files_bulk(upsert_rows)
     if changed_paths:
         cache.clear_summaries_bulk(changed_paths)
-
-    if force:
-        pending = [build_file_stub(item.file_path) for item in scanned_files]
-    else:
-        pending = [
-            build_file_stub(item.file_path)
-            for item in scanned_files
-            if item.file_path not in unchanged_paths
-        ]
 
     pending_path_set = {item["file_path"] for item in pending}
     return {
