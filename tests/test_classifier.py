@@ -69,3 +69,60 @@ def test_classify_files_iter_reports_errors_per_batch():
     results = list(classify_files_iter(Broken(), files, batch_size=2, workers=2))
     assert len(results) == 2
     assert all(error == "boom" and batch_results == [] for *_, batch_results, error in results)
+
+
+class _FakeCompletions:
+    def __init__(self, reject):
+        self.reject = reject
+        self.calls = []
+
+    def create(self, **kwargs):
+        from openai import BadRequestError
+        from types import SimpleNamespace
+
+        self.calls.append(kwargs)
+        if self.reject(kwargs):
+            # Built without its HTTP response so the test does not depend on the SDK's HTTP client package.
+            error = BadRequestError.__new__(BadRequestError)
+            Exception.__init__(error, "rejected")
+            error.status_code = 400
+            raise error
+        message = SimpleNamespace(content='{"summary": "ok"}')
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+
+def _compat_client(reject):
+    from types import SimpleNamespace
+    from classifier import LLMClient
+
+    client = LLMClient({"llm": {"api_key": "test", "base_url": "https://example.invalid/v1"}})
+    completions = _FakeCompletions(reject)
+    client.openai_client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    return client, completions
+
+
+def test_compatible_endpoint_falls_back_and_remembers_level():
+    client, completions = _compat_client(lambda kwargs: "response_format" in kwargs)
+    assert client.complete_json("prompt") == {"summary": "ok"}
+    assert len(completions.calls) == 2 and "response_format" not in completions.calls[1]
+    completions.calls.clear()
+    client.complete_json("prompt")
+    assert len(completions.calls) == 1, "the working request shape is reused without another 400"
+
+
+def test_compatible_endpoint_does_not_mask_real_bad_requests():
+    from openai import BadRequestError
+
+    client, completions = _compat_client(lambda kwargs: True)
+    with pytest.raises(BadRequestError):
+        client.complete_json("prompt")
+    # One pass down the ladder, no retries of a permanent error.
+    assert len(completions.calls) == 3
+    assert client._compat_level == 0
+
+
+def test_anthropic_provider_honours_base_url():
+    from classifier import LLMClient
+
+    client = LLMClient({"llm": {"provider": "anthropic", "api_key": "test", "base_url": "https://relay.example.invalid"}})
+    assert str(client.anthropic_client.base_url).startswith("https://relay.example.invalid")

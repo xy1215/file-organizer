@@ -49,6 +49,15 @@ DEFAULT_CATEGORIES = [
 JSON_OUTPUT_MAX_TOKENS = 8192
 CLASSIFY_IDLE_TIMEOUT = 300
 
+# Request shapes for OpenAI-compatible endpoints (base_url set), from richest to plainest. Some
+# gateways/models answer HTTP 400 to json_object mode, a large max_tokens or temperature; on a 400 we
+# step down once and remember the level that worked, so later calls go straight to it.
+COMPAT_CHAT_PARAM_LEVELS: tuple[dict[str, Any], ...] = (
+    {"response_format": {"type": "json_object"}, "max_tokens": JSON_OUTPUT_MAX_TOKENS, "temperature": 0},
+    {"max_tokens": 4096, "temperature": 0},
+    {},
+)
+
 
 class LLMClient:
     def __init__(self, config: dict[str, Any]) -> None:
@@ -58,6 +67,7 @@ class LLMClient:
         self.model = llm_config.get("model") or "gpt-4o-mini"
         self.summary_model = llm_config.get("summary_model") or self.model
         self.base_url = llm_config.get("base_url") or None
+        self._compat_level = 0
         if not self.api_key:
             raise ValueError("未配置 API Key，请在 config.yaml 或环境变量 LLM_API_KEY 中设置。")
 
@@ -68,7 +78,10 @@ class LLMClient:
             self.openai_client = OpenAI(**kwargs)
             self.anthropic_client = None
         elif self.provider == "anthropic":
-            self.anthropic_client = anthropic.Anthropic(api_key=self.api_key, timeout=120)
+            anthropic_kwargs: dict[str, Any] = {"api_key": self.api_key, "timeout": 120}
+            if self.base_url:
+                anthropic_kwargs["base_url"] = self.base_url
+            self.anthropic_client = anthropic.Anthropic(**anthropic_kwargs)
             self.openai_client = None
         else:
             raise ValueError(f"不支持的 LLM provider: {self.provider}")
@@ -163,15 +176,7 @@ class LLMClient:
 
     def _complete_openai_json(self, prompt: str, model_name: str) -> str:
         if self.base_url:
-            response = self.openai_client.chat.completions.create(
-                model=model_name,
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-                max_tokens=JSON_OUTPUT_MAX_TOKENS,
-                temperature=0,
-            )
-            message = response.choices[0].message if response.choices else None
-            return str(getattr(message, "content", "") or "")
+            return self._complete_compatible_chat(prompt, model_name)
 
         response = self.openai_client.responses.create(
             model=model_name,
@@ -180,6 +185,28 @@ class LLMClient:
             text={"format": {"type": "json_object"}},
         )
         return response.output_text
+
+    def _complete_compatible_chat(self, prompt: str, model_name: str) -> str:
+        level = self._compat_level
+        first_error: BadRequestError | None = None
+        while True:
+            try:
+                response = self.openai_client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": prompt}],
+                    **COMPAT_CHAT_PARAM_LEVELS[level],
+                )
+            except BadRequestError as exc:
+                first_error = first_error or exc
+                if level + 1 >= len(COMPAT_CHAT_PARAM_LEVELS):
+                    # Plainest request still rejected: the problem is not the parameters.
+                    raise first_error
+                level += 1
+                continue
+            if level > self._compat_level:
+                self._compat_level = level
+            message = response.choices[0].message if response.choices else None
+            return str(getattr(message, "content", "") or "")
 
 
 def chunk_list(items: list[Any], size: int) -> Iterator[list[Any]]:
