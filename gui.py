@@ -48,6 +48,7 @@ from app_paths import app_path, get_app_dir, resource_path
 from common import OperationCancelled, ensure_dict, ensure_str_list
 from main import RuntimeHooks, run_report, run_scan, run_stats, run_summarize
 from main import run_sync
+from scanner import get_default_folder
 from updater import (
     UpdateCancelled,
     UpdateCheckResult,
@@ -752,9 +753,13 @@ class MainWindow(QMainWindow):
         self.scan_desktop_checkbox = QCheckBox("Desktop")
         self.scan_documents_checkbox = QCheckBox("Documents")
         self.scan_downloads_checkbox = QCheckBox("Downloads")
-        self.scan_desktop_checkbox.setChecked(True)
-        self.scan_documents_checkbox.setChecked(True)
-        self.scan_downloads_checkbox.setChecked(True)
+        for checkbox, folder in (
+            (self.scan_desktop_checkbox, "Desktop"),
+            (self.scan_documents_checkbox, "Documents"),
+            (self.scan_downloads_checkbox, "Downloads"),
+        ):
+            checkbox.setChecked(True)
+            checkbox.setToolTip(f"实际位置：{get_default_folder(folder)}")
         defaults_row = QHBoxLayout()
         defaults_row.setSpacing(16)
         defaults_row.addWidget(self.scan_desktop_checkbox)

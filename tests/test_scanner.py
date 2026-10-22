@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+import pytest
 
 from scanner import compact_scan_roots, is_under_any_root, is_valid_file, scan_files
 
@@ -49,3 +52,29 @@ def test_scan_files_filters_and_excludes(tmp_path):
     )
     assert [Path(item.file_path).name for item in found] == ["plan.docx"]
     assert os.path.isabs(found[0].file_path)
+
+
+def test_default_folder_falls_back_to_home(monkeypatch, tmp_path):
+    import scanner
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(scanner, "_windows_known_folder", lambda folder_id: None)
+    assert scanner.get_default_folder("Documents") == tmp_path / "Documents"
+
+
+def test_default_folder_prefers_redirected_location(monkeypatch, tmp_path):
+    import scanner
+
+    redirected = tmp_path / "OneDrive" / "文档"
+    monkeypatch.setattr(scanner, "_windows_known_folder", lambda folder_id: redirected)
+    assert scanner.get_enabled_default_paths({"desktop": False, "documents": True, "downloads": False}) == [redirected]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows shell API")
+def test_windows_known_folder_lookup_returns_real_directory():
+    import scanner
+
+    for folder in ("Desktop", "Documents", "Downloads"):
+        located = scanner._windows_known_folder(scanner._WINDOWS_KNOWN_FOLDER_IDS[folder])
+        assert located is not None and located.is_absolute(), folder
+    assert scanner._windows_known_folder("00000000-0000-0000-0000-000000000000") is None

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -35,20 +36,63 @@ class ScannedFile:
     modified_time: float
 
 
+# Windows Known Folder IDs (FOLDERID_Desktop / Documents / Downloads).
+_WINDOWS_KNOWN_FOLDER_IDS = {
+    "Desktop": "B4BFCC3A-DB2C-424C-B029-7FE99A87C641",
+    "Documents": "FDD39AD0-238F-46AF-ADB4-6C85480369C7",
+    "Downloads": "374DE290-123F-4565-9164-39C4925E467B",
+}
+
+
+def _windows_known_folder(folder_id: str) -> Path | None:
+    """Ask the shell where a known folder really lives (OneDrive backup or a user move redirects them)."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        import uuid
+        from ctypes import wintypes
+
+        shell32 = ctypes.WinDLL("shell32")
+        ole32 = ctypes.WinDLL("ole32")
+        get_path = shell32.SHGetKnownFolderPath
+        get_path.argtypes = [ctypes.c_void_p, wintypes.DWORD, wintypes.HANDLE, ctypes.POINTER(ctypes.c_void_p)]
+        get_path.restype = ctypes.c_long
+        ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+        ole32.CoTaskMemFree.restype = None
+
+        guid = (ctypes.c_ubyte * 16).from_buffer_copy(uuid.UUID(folder_id).bytes_le)
+        raw_path = ctypes.c_void_p()
+        result = get_path(ctypes.byref(guid), 0, None, ctypes.byref(raw_path))
+        try:
+            if result != 0 or not raw_path.value:
+                return None
+            return Path(ctypes.wstring_at(raw_path.value))
+        finally:
+            ole32.CoTaskMemFree(raw_path)
+    except Exception:
+        logging.exception("查询系统文件夹位置失败: %s", folder_id)
+        return None
+
+
+def get_default_folder(folder: str) -> Path:
+    known_id = _WINDOWS_KNOWN_FOLDER_IDS.get(folder)
+    located = _windows_known_folder(known_id) if known_id else None
+    return located or Path.home() / folder
+
+
 def get_default_paths() -> list[Path]:
-    home = Path.home()
-    return [home / folder for folder in DEFAULT_SCAN_DIRS]
+    return [get_default_folder(folder) for folder in DEFAULT_SCAN_DIRS]
 
 
 def get_enabled_default_paths(default_path_flags: dict[str, bool] | None = None) -> list[Path]:
-    home = Path.home()
     if default_path_flags is None:
-        return [home / folder for folder in DEFAULT_SCAN_DIRS]
+        return get_default_paths()
 
     enabled: list[Path] = []
     for key, folder in DEFAULT_SCAN_KEY_MAP.items():
         if bool(default_path_flags.get(key, True)):
-            enabled.append(home / folder)
+            enabled.append(get_default_folder(folder))
     return enabled
 
 
