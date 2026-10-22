@@ -137,12 +137,59 @@ def download_update(
     return zip_path
 
 
-def apply_update(zip_path: Path, app_dir: Path) -> None:
+APP_EXE_NAME = "文件整理助手.exe"
+UPDATER_SCRIPT_NAME = "_updater.bat"
+
+# Pure ASCII on purpose: the exe name and PID arrive as arguments (the command line is Unicode),
+# so the script works whatever the system ANSI code page is. `ping` is used as sleep because
+# `timeout` fails when the process has no console input.
+UPDATER_SCRIPT = r"""@echo off
+setlocal
+set "APP_DIR=%~dp0"
+set "APP_EXE=%~1"
+set "APP_PID=%~2"
+cd /d "%APP_DIR%"
+
+rem Wait up to 60s for the running app to exit so its files are unlocked.
+set /a WAITED=0
+:wait_exit
+tasklist /FI "PID eq %APP_PID%" /NH 2>nul | find "%APP_PID%" >nul
+if not errorlevel 1 (
+  if %WAITED% geq 60 goto copy_files
+  set /a WAITED+=1
+  ping -n 2 127.0.0.1 >nul
+  goto wait_exit
+)
+
+:copy_files
+set /a TRIES=0
+:copy_retry
+xcopy /s /e /y /q /i "_update\*" "." >nul
+if errorlevel 1 (
+  if %TRIES% geq 10 goto launch
+  set /a TRIES+=1
+  ping -n 2 127.0.0.1 >nul
+  goto copy_retry
+)
+rmdir /s /q "_update"
+
+:launch
+if exist "%APP_EXE%" start "" "%APP_DIR%%APP_EXE%"
+del "%~f0"
+"""
+
+
+def apply_update(
+    zip_path: Path,
+    app_dir: Path,
+    *,
+    exe_name: str = APP_EXE_NAME,
+    wait_pid: int | None = None,
+) -> subprocess.Popen:
     if sys.platform != "win32":
         raise RuntimeError("自动更新仅支持 Windows 打包版。")
     update_dir = app_dir / "_update"
-    updater_script = app_dir / "_updater.bat"
-    exe_path = app_dir / "文件整理助手.exe"
+    updater_script = app_dir / UPDATER_SCRIPT_NAME
     if update_dir.exists():
         shutil.rmtree(update_dir, ignore_errors=True)
     update_dir.mkdir(parents=True, exist_ok=True)
@@ -155,30 +202,13 @@ def apply_update(zip_path: Path, app_dir: Path) -> None:
                 raise ValueError(f"危险路径: {info.filename}")
         archive.extractall(update_dir)
 
-    script_content = f"""@echo off
-set "APP_DIR=%~dp0"
-set "APP_EXE={exe_path.name}"
-cd /d "%~dp0"
-timeout /t 2 /nobreak >nul
-xcopy /s /y /q "_update\\*" "." >nul
-rmdir /s /q "_update"
-for /l %%I in (1,1,10) do (
-  if exist "%APP_EXE%" (
-    start "" "%APP_DIR%%APP_EXE%"
-    goto :cleanup
-  )
-  timeout /t 1 /nobreak >nul
-)
-:cleanup
-del "_updater.bat"
-"""
-    updater_script.write_text(script_content, encoding="mbcs")
+    updater_script.write_text(UPDATER_SCRIPT.replace("\n", "\r\n"), encoding="ascii", newline="")
     creationflags = (
         getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
     )
-    subprocess.Popen(
-        ["cmd", "/c", str(updater_script.name)],
+    return subprocess.Popen(
+        ["cmd", "/c", updater_script.name, exe_name, str(wait_pid if wait_pid is not None else os.getpid())],
         cwd=str(app_dir),
         creationflags=creationflags,
         close_fds=True,
