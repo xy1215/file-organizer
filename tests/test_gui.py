@@ -63,3 +63,31 @@ def test_save_config_round_trip_is_atomic(window):
     assert yaml.safe_load(gui.CONFIG_PATH.read_text(encoding="utf-8"))["llm"]["api_key"] == "sk-test"
     assert not gui.CONFIG_PATH.with_name("config.yaml.tmp").exists()
     assert gui.load_config()["llm"]["api_key"] == "sk-test"
+
+
+def test_auto_sync_never_opens_dialogs(window, monkeypatch):
+    app, win = window
+    started = []
+    monkeypatch.setattr(gui.CommandWorker, "_dispatch", lambda self: started.append(self.args))
+
+    def fail(*args, **kwargs):
+        raise AssertionError("auto sync must not open a dialog")
+
+    win._confirm_llm_usage_if_needed = fail
+    win._ensure_saved_config_for_run = fail
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", staticmethod(fail))
+    monkeypatch.setattr(QtWidgets.QMessageBox, "information", staticmethod(fail))
+
+    # No API key saved: skipped with a log line, no dialog.
+    win._trigger_auto_sync()
+    assert win.worker is None
+    assert "没有 API Key" in win.log_output.toPlainText()
+
+    config = gui.default_config()
+    config["llm"]["api_key"] = "sk-test"
+    gui.save_config(config)
+    win._trigger_auto_sync()
+    assert win.worker is not None
+    win.worker.wait(5000)
+    app.processEvents()
+    assert started == [["sync"]]

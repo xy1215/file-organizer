@@ -1048,23 +1048,30 @@ class MainWindow(QMainWindow):
             return
         self._run_command(["summarize", "--file", file_path])
 
-    def _run_command(self, args: list[str]) -> None:
+    def _run_command(self, args: list[str], *, interactive: bool = True) -> None:
+        """Start a task. Non-interactive runs (auto sync) never open dialogs: they use the saved
+        config, and turning auto sync on is the consent to call the model."""
         if self.worker and self.worker.isRunning():
-            QMessageBox.information(self, "任务进行中", "当前已有任务在运行，请等待完成。")
+            if interactive:
+                QMessageBox.information(self, "任务进行中", "当前已有任务在运行，请等待完成。")
             return
 
-        config = self._build_config_from_form()
+        config = self._build_config_from_form() if interactive else load_config()
         if self._command_needs_llm(args) and not config["llm"].get("api_key"):
+            if not interactive:
+                self._append_log("自动整理已跳过：已保存的配置中没有 API Key。")
+                return
             QMessageBox.warning(
                 self,
                 "缺少 API Key",
                 "当前操作需要调用 AI 模型，但 API Key 为空。\n请先在左侧配置面板填写 API Key 并保存。",
             )
             return
-        if not self._confirm_llm_usage_if_needed(args):
-            return
-        if not self._ensure_saved_config_for_run(config):
-            return
+        if interactive:
+            if not self._confirm_llm_usage_if_needed(args):
+                return
+            if not self._ensure_saved_config_for_run(config):
+                return
         self._sync_auto_scan_timer()
         self.current_command = list(args)
         self.current_total = 0
@@ -1592,10 +1599,14 @@ class MainWindow(QMainWindow):
     def _trigger_auto_sync(self) -> None:
         if self.worker and self.worker.isRunning():
             return
+        # The timer keeps firing while any modal dialog runs its own event loop; never stack runs on it.
+        if QApplication.activeModalWidget() is not None:
+            self._append_log("自动整理本次已跳过：有对话框尚未关闭。")
+            return
         self._append_log(
             f"自动整理已触发：每 {self.auto_scan_interval_input.value()} 分钟执行一次检查和结果更新。"
         )
-        self._run_command(["sync"])
+        self._run_command(["sync"], interactive=False)
 
     # ── Window lifecycle ──────────────────────────────────────────────
 
