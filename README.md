@@ -186,7 +186,22 @@ python main.py stats
 - `.md`
 - `.csv`
 
-旧版 Office 文件 `.doc`、`.xls`、`.ppt` 可以参与分类，但暂不支持正文提取摘要。如果需要摘要，建议先另存为新版格式。
+`.txt`、`.md`、`.csv` 会自动识别 UTF-8（含 BOM）、UTF-16 和 GBK/GB18030 编码，记事本或 Excel 在中文 Windows 上默认保存的文件也能正常提取。
+
+旧版 Office 文件 `.doc`、`.xls`、`.ppt` 需要本机安装 LibreOffice（`soffice` 在 PATH 中）才能自动转换并提取正文；未安装时仍可参与分类，摘要会提示需要转换。
+
+图片型 PDF（扫描件）需要安装 Tesseract OCR（`tesseract` 在 PATH 中，建议附带 `chi_sim` 中文语言包），会对前 5 页做文字识别。
+
+如果某个扫描目录暂时无法访问（例如 U 盘拔出、网络盘离线），该目录下已有的分类和摘要缓存会被保留，重新连接后无需再次调用模型。
+
+## 开发与测试
+
+```bash
+pip install -r requirements.txt pytest
+python -m pytest -q
+```
+
+GUI 测试使用 Qt 的 `offscreen` 平台运行；缺少 PySide6 或 Qt 系统库时会自动跳过。每次推送都会在 Windows 和 Ubuntu 上自动运行测试（见 `.github/workflows/test.yml`）。
 
 ## 适合谁用
 
