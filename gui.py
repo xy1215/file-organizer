@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import sys
@@ -212,8 +213,8 @@ class CommandWorker(QThread):
     progress = Signal(str, int, int, str)
     finished_status = Signal(bool, str, bool)
 
-    def __init__(self, args: list[str]) -> None:
-        super().__init__()
+    def __init__(self, args: list[str], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
         self.args = args
         self._cancel_event = threading.Event()
 
@@ -363,8 +364,15 @@ def load_config() -> dict[str, Any]:
 
 
 def save_config(config: dict[str, Any]) -> None:
-    with CONFIG_PATH.open("w", encoding="utf-8") as handle:
-        yaml.safe_dump(config, handle, allow_unicode=True, sort_keys=False)
+    # Write to a sibling temp file and swap it in, so a crash or full disk never leaves a truncated config.
+    temp_path = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+    try:
+        with temp_path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(config, handle, allow_unicode=True, sort_keys=False)
+        os.replace(temp_path, CONFIG_PATH)
+    except OSError:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def normalize_batch_size(raw_value: Any) -> int:
@@ -447,6 +455,7 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.worker: CommandWorker | None = None
+        self._quit_after_task = False
         self.update_check_worker: UpdateCheckWorker | None = None
         self.update_download_worker: UpdateDownloadWorker | None = None
         self.available_update: UpdateInfo | None = None
@@ -1068,10 +1077,13 @@ class MainWindow(QMainWindow):
         self._append_log(f"开始执行：{' '.join(args)}")
         self._update_run_buttons(running=True)
 
-        self.worker = CommandWorker(args=args)
+        # Parented to the window so dropping self.worker never garbage-collects a still-running
+        # QThread (finished_status is emitted just before run() returns); freed once it exits.
+        self.worker = CommandWorker(args=args, parent=self)
         self.worker.log.connect(self._append_log)
         self.worker.progress.connect(self._apply_progress_update)
         self.worker.finished_status.connect(self._on_worker_finished)
+        self.worker.finished.connect(self.worker.deleteLater)
         self.worker.start()
 
     def _on_worker_finished(self, success: bool, message: str, cancelled: bool) -> None:
@@ -1095,6 +1107,8 @@ class MainWindow(QMainWindow):
         elif success:
             self._append_log("任务执行完成。")
         self._update_run_buttons(running=False)
+        if self._quit_after_task:
+            QTimer.singleShot(0, self.close)
 
     def _update_run_buttons(self, running: bool = False) -> None:
         enabled = not running
@@ -1577,6 +1591,34 @@ class MainWindow(QMainWindow):
             f"自动整理已触发：每 {self.auto_scan_interval_input.value()} 分钟执行一次检查和结果更新。"
         )
         self._run_command(["sync"])
+
+    # ── Window lifecycle ──────────────────────────────────────────────
+
+    def closeEvent(self, event) -> None:
+        if self.worker and self.worker.isRunning():
+            if not self._quit_after_task:
+                reply = QMessageBox.question(
+                    self,
+                    "任务进行中",
+                    "当前任务尚未完成，确定要取消任务并退出吗？\n已完成的结果会被保存。",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if reply != QMessageBox.Yes:
+                    event.ignore()
+                    return
+                self._quit_after_task = True
+                self._cancel_running_task()
+                self._append_log("当前步骤结束后将自动退出。")
+            event.ignore()
+            return
+        self.auto_scan_timer.stop()
+        # Destroying a QThread that is still running aborts the process; let them all exit first.
+        for thread in self.findChildren(QThread):
+            if isinstance(thread, UpdateDownloadWorker):
+                thread.cancel()
+            thread.wait(10000)
+        super().closeEvent(event)
 
     # ── Responsive ────────────────────────────────────────────────────
 
