@@ -233,14 +233,22 @@ def _decode_text_bytes(data: bytes, complete: bool) -> str:
         if data.startswith(bom):
             decoder = codecs.getincrementaldecoder(encoding)(errors="ignore")
             return decoder.decode(data, final=complete)
-    for encoding in ("utf-8", "gb18030"):
-        decoder = codecs.getincrementaldecoder(encoding)(errors="strict")
-        try:
-            # final=False tolerates a multi-byte character cut off at the read limit.
-            return decoder.decode(data, final=complete)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="ignore")
+    try:
+        # final=False tolerates a multi-byte character cut off at the read limit.
+        return codecs.getincrementaldecoder("utf-8")(errors="strict").decode(data, final=complete)
+    except UnicodeDecodeError:
+        pass
+    lossy = codecs.getincrementaldecoder("utf-8")(errors="replace").decode(data, final=complete)
+    invalid = lossy.count("\ufffd")
+    valid_non_ascii = sum(1 for char in lossy if ord(char) > 127) - invalid
+    # UTF-8 with a few stray bytes keeps most of its multi-byte characters valid, while GBK text read
+    # as UTF-8 yields far more invalid sequences than valid ones; don't turn the former into mojibake.
+    if valid_non_ascii and valid_non_ascii >= 2 * invalid:
+        return lossy.replace("\ufffd", "")
+    try:
+        return codecs.getincrementaldecoder("gb18030")(errors="strict").decode(data, final=complete)
+    except UnicodeDecodeError:
+        return lossy.replace("\ufffd", "")
 
 
 def _read_text_prefix(file_path: Path, max_bytes: int = _TEXT_SNIFF_BYTES) -> str:

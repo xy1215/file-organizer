@@ -225,10 +225,18 @@ def _scan_and_prepare(
     _progress("scan", len(scanned_files), len(scanned_files), "扫描完成，正在检查缓存...", hooks)
     existing_records = cache.index_scan_state_by_path()
     scanned_paths = {item.file_path for item in scanned_files}
-    # Files under an offline drive / disconnected share are not "deleted": keep their paid-for results.
-    kept_paths = scanned_paths | {
-        path for path in existing_records if unreachable_roots and is_under_any_root(path, unreachable_roots)
-    }
+    kept_paths = set(scanned_paths)
+    if unreachable_roots:
+        # A missing file is only known to be deleted when its scan root was readable. While any root is
+        # offline, keep everything outside the readable roots: matching records to the offline root by
+        # prefix is unreliable (a mapped drive's files were cached under their UNC path, but an offline
+        # root cannot be resolved). Records of roots removed from the config go on the next full scan.
+        reachable_roots = [
+            root
+            for root in resolve_scan_roots(scan_paths, default_path_flags=default_path_flags)
+            if root not in unreachable_roots
+        ]
+        kept_paths |= {path for path in existing_records if not is_under_any_root(path, reachable_roots)}
     removed = cache.delete_absent_files(kept_paths)
     if removed:
         _log(f"[cyan]已清理 {removed} 条失效缓存记录（源文件不存在）。[/cyan]", hooks)
@@ -238,6 +246,7 @@ def _scan_and_prepare(
     pending: list[dict[str, Any]] = []
     summary_candidates: list[str] = []
     summary_candidate_seen: set[str] = set()
+    failed_summary_retries: list[str] = []
     for item in scanned_files:
         _raise_if_cancelled(hooks)
         record = existing_records.get(item.file_path)
@@ -252,6 +261,9 @@ def _scan_and_prepare(
             changed_paths.append(item.file_path)
         if force or content_changed or not record.has_category:
             pending.append(build_file_stub(item.file_path))
+        if force and not content_changed and not record.has_summary:
+            # e.g. LibreOffice/OCR installed since the last run: give recorded failures another chance.
+            failed_summary_retries.append(item.file_path)
         if content_changed or not record.has_summary:
             if item.file_path not in summary_candidate_seen:
                 summary_candidate_seen.add(item.file_path)
@@ -261,6 +273,8 @@ def _scan_and_prepare(
     cache.upsert_files_bulk(upsert_rows)
     if changed_paths:
         cache.clear_summaries_bulk(changed_paths)
+    if failed_summary_retries:
+        cache.clear_summary_failures_bulk(failed_summary_retries)
 
     pending_path_set = {item["file_path"] for item in pending}
     return {

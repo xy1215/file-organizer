@@ -134,3 +134,52 @@ def test_force_rescan_keeps_summaries_of_unchanged_files(env):
         assert all(row["category"] for row in cache.list_all())
     finally:
         cache.close()
+
+
+def test_force_rescan_retries_failed_summaries(env):
+    doc = env["data_dir"] / "old.txt"
+    doc.write_text("内容", encoding="utf-8")
+    main.run_scan(hooks=main.RuntimeHooks(log=lambda message: None))
+    cache = _cache(env)
+    try:
+        cache.update_summary_failure(str(doc.resolve()), "needs_conversion", "需要 LibreOffice")
+    finally:
+        cache.close()
+
+    main.run_scan(force=True, hooks=main.RuntimeHooks(log=lambda message: None))
+    main.run_sync(hooks=main.RuntimeHooks(log=lambda message: None))
+
+    cache = _cache(env)
+    try:
+        record = cache.get(str(doc.resolve()))
+    finally:
+        cache.close()
+    assert record.summary_status == "success" and record.summary
+
+
+def test_offline_root_keeps_records_even_when_cached_under_another_path_form(env):
+    # A mapped drive Z:\\docs is cached under its UNC form while online; when offline the root
+    # cannot be resolved, so prefix matching against the root would miss these records.
+    offline_root = env["tmp"] / "Z-drive"
+    env["config"]["scan"]["paths"].append(str(offline_root))
+    (env["data_dir"] / "present.txt").write_text("内容", encoding="utf-8")
+    unc_style = str(env["tmp"] / "server" / "share" / "合同.pdf")
+    cache = _cache(env)
+    try:
+        cache.upsert_file(unc_style, 10, 1.0, category="工作/合同与协议", summary="旧摘要")
+        main._scan_and_prepare(cache, env["config"], hooks=main.RuntimeHooks(log=lambda message: None))
+        assert cache.get(unc_style) is not None
+    finally:
+        cache.close()
+
+
+def test_records_of_removed_roots_are_purged_when_all_roots_are_readable(env):
+    (env["data_dir"] / "present.txt").write_text("内容", encoding="utf-8")
+    stale = str(env["tmp"] / "no-longer-scanned" / "a.pdf")
+    cache = _cache(env)
+    try:
+        cache.upsert_file(stale, 10, 1.0, category="其他")
+        main._scan_and_prepare(cache, env["config"], hooks=main.RuntimeHooks(log=lambda message: None))
+        assert cache.get(stale) is None
+    finally:
+        cache.close()

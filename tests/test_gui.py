@@ -91,3 +91,31 @@ def test_auto_sync_never_opens_dialogs(window, monkeypatch):
     win.worker.wait(5000)
     app.processEvents()
     assert started == [["sync"]]
+
+
+def test_run_gui_exits_promptly_despite_lingering_worker_threads(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    script = tmp_path / "launch.py"
+    script.write_text(
+        "import sys, threading, time\n"
+        f"sys.path.insert(0, {str(Path(gui.__file__).parent)!r})\n"
+        "import gui\n"
+        "from PySide6.QtCore import QTimer\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "gui.check_for_update_status = lambda version: None\n"
+        "threading.Thread(target=time.sleep, args=(60,)).start()  # like an abandoned LLM call\n"
+        "original_show = gui.MainWindow.show\n"
+        "def show(self):\n"
+        "    original_show(self)\n"
+        "    QTimer.singleShot(300, QApplication.quit)\n"
+        "gui.MainWindow.show = show\n"
+        "gui.run_gui()\n",
+        encoding="utf-8",
+    )
+    started = time.monotonic()
+    completed = subprocess.run([sys.executable, str(script)], cwd=tmp_path, timeout=45)
+    assert completed.returncode == 0
+    assert time.monotonic() - started < 30

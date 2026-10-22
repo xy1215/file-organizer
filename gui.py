@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import platform
 import shutil
@@ -9,7 +10,7 @@ import time
 import urllib.parse
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import yaml
 from PySide6.QtCore import QThread, Qt, QTimer, Signal, QUrl
@@ -1055,6 +1056,13 @@ class MainWindow(QMainWindow):
             if interactive:
                 QMessageBox.information(self, "任务进行中", "当前已有任务在运行，请等待完成。")
             return
+        if self.update_download_worker and self.update_download_worker.isRunning():
+            # A task started now could keep the app from exiting when the update restarts it.
+            if interactive:
+                QMessageBox.information(self, "正在下载更新", "更新下载完成前暂不能开始新任务。")
+            else:
+                self._append_log("自动整理本次已跳过：正在下载更新。")
+            return
 
         config = self._build_config_from_form() if interactive else load_config()
         if self._command_needs_llm(args) and not config["llm"].get("api_key"):
@@ -1493,6 +1501,11 @@ class MainWindow(QMainWindow):
             return
         if not zip_path:
             return
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(
+                self, "任务进行中", "当前有任务正在运行，请等任务完成后再点击顶部提示条更新。"
+            )
+            return
         reply = QMessageBox.question(
             self, "更新已下载", "更新将在重启后生效，是否立即重启？",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes,
@@ -1629,7 +1642,8 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.auto_scan_timer.stop()
-        # Destroying a QThread that is still running aborts the process; let them all exit first.
+        # Let background threads finish so update downloads/checks end cleanly; run_gui then leaves via
+        # os._exit, so a thread that outlives this wait is not destroyed while running.
         for thread in self.findChildren(QThread):
             if isinstance(thread, UpdateDownloadWorker):
                 thread.cancel()
@@ -1653,11 +1667,19 @@ class MainWindow(QMainWindow):
         )
 
 
-def run_gui() -> int:
+def run_gui() -> NoReturn:
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    return app.exec()
+    exit_code = app.exec()
+    # closeEvent has already waited for every QThread, and all cache writes happen on them. What can
+    # still be alive are executor threads stuck in an abandoned LLM call; a normal interpreter exit would
+    # join them, leaving an invisible process (and a locked exe the updater is waiting on) for minutes.
+    logging.shutdown()
+    for stream in (sys.stdout, sys.stderr):  # None in a windowed (no console) build
+        if stream is not None:
+            stream.flush()
+    os._exit(exit_code)
 
 
 if __name__ == "__main__":

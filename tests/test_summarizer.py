@@ -68,3 +68,13 @@ def test_extract_unsupported_type(tmp_path):
     with pytest.raises(UnsupportedSummaryError) as info:
         extract_text(str(path))
     assert info.value.code == "unsupported_type"
+
+
+@pytest.mark.parametrize("text", ["季度报告：收入增长，成本下降。", "合同", "简历-王小明-2024"])
+def test_utf8_with_a_stray_byte_is_not_decoded_as_gb18030(text):
+    assert _decode_text_bytes(text.encode("utf-8") + b"\x80", complete=True) == text
+
+
+@pytest.mark.parametrize("text", ["合同", "发票", "姓名,金额\n张三,100", "《红楼梦》读书笔记——第一回"])
+def test_short_gbk_is_still_detected(text):
+    assert _decode_text_bytes(text.encode("gbk"), complete=True) == text
